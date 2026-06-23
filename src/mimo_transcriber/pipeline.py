@@ -82,20 +82,57 @@ def _load_or_init_manifest(
     fingerprint,
     paths: TaskPaths,
     probe_fn: Callable[[Path], Any],
-) -> TaskManifest:
-    try:
-        manifest = store.load()
-        logger.debug("从缓存加载 manifest: %s", store.path)
-        store.reconcile_artifacts(manifest, paths.work_dir)
-        store.reset_retryable_work(manifest)
-        return manifest
-    except (FileNotFoundError, Exception):
+) -> tuple[TaskManifest, bool]:
+    import shutil
+
+    def _init_new() -> TaskManifest:
         logger.debug("初始化新 manifest: %s", store.path)
         metadata = probe_fn(config.input_path)
         identity = _identity_from_fingerprint(paths.task_hash, fingerprint)
         manifest = TaskManifest.new(identity, metadata)
         store.save(manifest)
         return manifest
+
+    try:
+        manifest = store.load()
+        if manifest.identity.fingerprint_sha256 != fingerprint.content_sha256:
+            logger.info("Manifest 指纹不匹配，清理旧缓存并重新初始化")
+            if paths.work_dir.exists():
+                shutil.rmtree(paths.work_dir, ignore_errors=True)
+            return _init_new(), True
+        logger.debug("从缓存加载 manifest: %s", store.path)
+        store.reconcile_artifacts(manifest, paths.work_dir)
+        store.reset_retryable_work(manifest)
+        return manifest, False
+    except (FileNotFoundError, Exception):
+        return _init_new(), True
+
+
+def _manage_target_index(paths: TaskPaths) -> None:
+    """原子管理 target_index：检测陈旧缓存并写入当前 task_hash。"""
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+
+    paths.target_index.parent.mkdir(parents=True, exist_ok=True)
+    if paths.target_index.exists():
+        try:
+            existing = _json.loads(paths.target_index.read_text(encoding="utf-8"))
+            old_hash = existing.get("task_hash")
+            if old_hash and old_hash != paths.task_hash:
+                old_work_dir = paths.root / old_hash
+                if old_work_dir.exists():
+                    logger.info("输入指纹变化，清理旧工作目录: %s", old_work_dir)
+                    _shutil.rmtree(old_work_dir, ignore_errors=True)
+        except Exception:
+            logger.debug("读取 target_index 失败，忽略并覆盖", exc_info=True)
+
+    tmp_index = paths.target_index.with_name(
+        f".{paths.target_index.name}.tmp"
+    )
+    payload = _json.dumps({"task_hash": paths.task_hash}, ensure_ascii=False)
+    tmp_index.write_text(payload, encoding="utf-8")
+    _os.replace(tmp_index, paths.target_index)
 
 
 async def run_pipeline(
@@ -117,8 +154,11 @@ async def run_pipeline(
 
     try:
         with TaskLock(paths.lock) as _lock:
+            # Manage target_index: detect stale cache, then atomically write current task_hash
+            _manage_target_index(paths)
+
             store = ManifestStore(paths.manifest)
-            manifest = _load_or_init_manifest(store, config, fingerprint, paths, dependencies.probe)
+            manifest, _ = _load_or_init_manifest(store, config, fingerprint, paths, dependencies.probe)
 
             # Stage 1: Audio probe (recoverable)
             reporter.start_stage("音频探测")
@@ -299,7 +339,6 @@ async def _run_segment_workers(
     # Enqueue work: pending/failed segments need slicing; ready slices go direct to transcription
     pending = 0
     paths.audio_dir.mkdir(parents=True, exist_ok=True)
-    paths.transcripts_dir.mkdir(parents=True, exist_ok=True)
     for record in work_items:
         if record.segment.segment_id in completed:
             continue
@@ -349,6 +388,10 @@ async def _run_segment_workers(
                 else:
                     candidate.unlink(missing_ok=True)
                     children = split_segment(seg)
+                    logger.debug(
+                        "[%s] 切片过大 (duration=%.1fs)，拆分为 %d 个子片段",
+                        seg.segment_id, seg.duration, len(children),
+                    )
                     child_records = [SegmentRecord.from_segment(c) for c in children]
                     # Replace parent record in manifest with children atomically
                     idx = next(i for i, r in enumerate(manifest.segments) if r.segment.segment_id == record.segment.segment_id)
@@ -363,6 +406,10 @@ async def _run_segment_workers(
                 logger.error("切片失败 %s: %s", record.segment.segment_id, exc)
                 record.slice_status = "failed"
                 record.error = str(exc)
+                record.segment.text = "[该片段识别失败]"
+                record.segment.status = SegmentStatus.FAILED
+                if record.segment.segment_id in segments_by_id:
+                    segments_by_id[record.segment.segment_id] = record.segment
                 store.save(manifest)
                 reporter.segment_sliced()
                 reporter.segment_completed(False)
@@ -417,9 +464,13 @@ async def _run_segment_workers(
                 except Exception as exc:
                     if config.fail_fast:
                         cancel_event.set()
-                    logger.error("转写失败 %s: %s", record.segment.segment_id, exc)
+                    logger.error(
+                        "转写失败 %s (duration=%.1fs, %s): %s",
+                        record.segment.segment_id, record.segment.duration,
+                        type(exc).__name__, str(exc)[:300],
+                    )
                     record.transcript_status = "failed"
-                    record.error = str(exc)
+                    record.error = f"{type(exc).__name__}: {exc}"
                     record.segment.text = "[该片段识别失败]"
                     record.segment.status = SegmentStatus.FAILED
                     completed[record.segment.segment_id] = record.segment

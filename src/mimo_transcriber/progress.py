@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import logging
 import sys
 import threading
 from typing import Callable, Protocol, TextIO, runtime_checkable
-
-logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -84,7 +81,6 @@ class TerminalProgressReporter:
                 )
                 self._rich_available = True
             except Exception:
-                logger.debug("Rich 初始化失败，回退到普通日志", exc_info=True)
                 self._is_tty = False
 
     def _safe(self, action: Callable[[], None]) -> None:
@@ -93,11 +89,13 @@ class TerminalProgressReporter:
                 action()
         except Exception:
             if self._rich_available:
-                logger.debug("进度渲染故障，切换到普通日志", exc_info=True)
                 self._rich_available = False
                 self._is_tty = False
-            else:
-                logger.debug("进度回调异常", exc_info=True)
+            # 进度渲染故障静默处理，不污染控制台输出
+
+    def _write_line(self, text: str) -> None:
+        """向流写入一行文本，不经过 logging 模块。"""
+        print(text, file=self._stream, flush=True)
 
     def start_stage(self, stage: str, detail: str | None = None) -> None:
         label = stage if detail is None else f"{stage}｜{detail}"
@@ -110,7 +108,7 @@ class TerminalProgressReporter:
                     label, total=None, visible=True
                 )
             else:
-                logger.info(label)
+                self._write_line(label)
 
         self._safe(_start)
 
@@ -145,7 +143,7 @@ class TerminalProgressReporter:
                     description=f"正在处理音频片段｜{msg}",
                 )
             else:
-                logger.info(msg)
+                self._write_line(msg)
 
         self._safe(_retry)
 
@@ -153,11 +151,9 @@ class TerminalProgressReporter:
         def _finish() -> None:
             if self._rich_available and self._progress is not None:
                 self._progress.stop()
-            logger.info(
-                "已完成｜%d 成功｜%d 失败｜耗时 %.2f 秒",
-                success_count,
-                failure_count,
-                elapsed_seconds,
+            self._write_line(
+                f"已完成｜{success_count} 成功｜{failure_count} 失败｜"
+                f"耗时 {elapsed_seconds:.2f} 秒"
             )
 
         self._safe(_finish)

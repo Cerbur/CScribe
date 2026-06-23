@@ -29,22 +29,69 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "cpu", "cuda", "mps"),
         default="auto",
     )
-    parser.add_argument("--concurrency", type=int, default=4)
-    parser.add_argument("--requests-per-minute", type=int, default=80)
+    parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument("--requests-per-minute", type=int, default=20)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--keyword-count", type=int, default=20)
     parser.add_argument("--debug-json", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
 
+def _setup_logging(debug: bool) -> None:
+    """配置 Python logging，仅 --debug 时输出应用日志。
+
+    第三方库（httpcore / huggingface_hub / urllib3 / matplotlib 等）
+    始终抑制到 WARNING 以上，避免正常运行时产生大量噪音。
+    """
+    # 第三方库：始终抑制
+    for noisy in (
+        "httpcore",
+        "httpx",
+        "huggingface_hub",
+        "urllib3",
+        "matplotlib",
+        "openai",
+        "PIL",
+        "asyncio",
+        "fsspec",
+        "filelock",
+        "huggingface",
+        "transformers",
+        "torch",
+        "pyannote",
+        "aiohttp",
+        "botocore",
+    ):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    if debug:
+        # --debug：打开自身 DEBUG 日志
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+            force=True,
+        )
+    else:
+        # 默认：抑制所有日志
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(asctime)s %(levelname)s %(message)s",
+            force=True,
+        )
+
+
 async def async_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+
+    # 日志策略：
+    #   - 默认：根 logger 设为 WARNING，抑制所有第三方库和自身的日志输出
+    #   - --debug：仅打开 mimotranscriber 自身的 DEBUG 日志
+    #   - 进度信息由 TerminalProgressReporter 直接输出，不经过 logging 模块
+    _setup_logging(debug=args.debug)
+
     config = AppConfig(
         input_path=args.input,
         output_path=args.output,
@@ -59,6 +106,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         keyword_count=args.keyword_count,
         debug_json=args.debug_json,
         fail_fast=args.fail_fast,
+        debug=args.debug,
         verbose=args.verbose,
     )
 
@@ -66,24 +114,18 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
     try:
         mimo_key, hf_token = validate_runtime(config)
         result = await run_pipeline(config, mimo_key, hf_token, reporter=reporter)
-        logging.info("输出文件: %s", result.outcome.summary.output_path)
-        logging.info(
-            "片段: %d 成功 / %d 失败；耗时 %.2f 秒",
-            result.outcome.summary.succeeded,
-            result.outcome.summary.failed,
-            result.outcome.summary.elapsed_seconds,
-        )
+        print(f"输出文件: {result.outcome.summary.output_path}", file=sys.stderr)
         return result.exit_code
     except TaskAlreadyRunningError:
-        logging.error("相同任务正在运行，请等待前一次任务完成")
+        print("错误: 相同任务正在运行，请等待前一次任务完成", file=sys.stderr)
         return 1
     except (ConfigError, RuntimeError) as exc:
-        logging.error("%s", exc)
-        if args.verbose:
+        print(f"错误: {exc}", file=sys.stderr)
+        if args.debug:
             logging.exception("详细错误")
         return 1
     except asyncio.CancelledError:
-        logging.info("用户中断，已保留工作目录供后续恢复")
+        print("用户中断，已保留工作目录供后续恢复", file=sys.stderr)
         return 130
     finally:
         reporter.close()

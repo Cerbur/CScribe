@@ -63,7 +63,6 @@ class TaskPaths:
     normalized: Path
     preflight: Path
     audio_dir: Path
-    transcripts_dir: Path
     target_index: Path
 
     @classmethod
@@ -108,7 +107,6 @@ class TaskPaths:
             normalized=work_dir / "normalized.wav",
             preflight=work_dir / "preflight.wav",
             audio_dir=work_dir / "audio",
-            transcripts_dir=work_dir / "transcripts",
             target_index=root / "targets" / f"{target_hash}.json",
         )
 
@@ -127,6 +125,7 @@ def _process_probe(pid: int) -> float | None:
             capture_output=True,
             text=True,
             check=True,
+            env={**os.environ, "LC_TIME": "C"},
         )
         line = result.stdout.strip()
         if not line:

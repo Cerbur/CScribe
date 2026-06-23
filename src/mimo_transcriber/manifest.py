@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 ArtifactStatus = Literal["pending", "ready", "failed"]
 
 
+def _mtime_or_now(source_path: Path) -> str:
+    """Return the file's mtime as an ISO string, or now() if unavailable."""
+    try:
+        mtime = source_path.stat().st_mtime
+    except (FileNotFoundError, OSError):
+        return datetime.now(timezone.utc).isoformat()
+    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
+
 @dataclass
 class TaskIdentity:
     task_hash: str
@@ -139,7 +148,7 @@ class TaskManifest:
             metadata_creation_time=(
                 metadata.creation_time.isoformat() if metadata.creation_time else None
             ),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=_mtime_or_now(metadata.source_path),
         )
 
     def to_dict(self) -> dict[str, object]:

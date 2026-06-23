@@ -215,8 +215,11 @@ def select_diarization_pipeline(
             max_speakers,
         )
         if not segments:
-            raise DiarizationError("预检样本未检测到可用语音")
+            logger.info(
+                "预检样本未检测到语音（可能为静音段），MPS 管线已成功加载并运行"
+            )
     except Exception as exc:
+        logger.warning("MPS 预检异常: %s: %s", type(exc).__name__, exc)
         category = classify_mps_failure(exc, "preflight")
         if pipeline is not None:
             del pipeline

@@ -26,12 +26,13 @@ class AppConfig:
     max_speakers: int = 6
     language: Language = "auto"
     device: Device = "auto"
-    concurrency: int = 4
-    requests_per_minute: int = 80
+    concurrency: int = 2
+    requests_per_minute: int = 20
     max_retries: int = 3
     keyword_count: int = 20
     debug_json: bool = False
     fail_fast: bool = False
+    debug: bool = False
     verbose: bool = False
 
     @property

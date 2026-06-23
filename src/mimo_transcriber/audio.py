@@ -113,5 +113,12 @@ def workspace(keep: bool) -> Iterator[Path]:
 
 
 def payload_fits(path: Path, segment: SpeakerSegment) -> bool:
-    encoded = base64.b64encode(path.read_bytes())
-    return len(encoded) <= MAX_BASE64_BYTES
+    """仅用文件尺寸判断 Base64 编码后是否超限，避免实际编码的开销。
+
+    base64.b64encode 输出长度公式：
+        base64_len = 4 * ceil(file_size / 3)
+    加上 "data:audio/mpeg;base64," 前缀 24 字节。
+    """
+    prefix_len = 24  # "data:audio/mpeg;base64,"
+    base64_len = 4 * ((path.stat().st_size + 2) // 3)
+    return (base64_len + prefix_len) <= MAX_BASE64_BYTES

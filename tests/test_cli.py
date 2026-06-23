@@ -9,8 +9,8 @@ def test_parser_exposes_required_defaults() -> None:
     args = build_parser().parse_args(["meeting.m4a"])
     assert args.language == "auto"
     assert args.device == "auto"
-    assert args.concurrency == 4
-    assert args.requests_per_minute == 80
+    assert args.concurrency == 2
+    assert args.requests_per_minute == 20
     assert args.max_retries == 3
     assert args.keyword_count == 20
 
@@ -18,6 +18,11 @@ def test_parser_exposes_required_defaults() -> None:
 def test_parser_accepts_experimental_mps() -> None:
     args = build_parser().parse_args(["meeting.m4a", "--device", "mps"])
     assert args.device == "mps"
+
+
+def test_parser_accepts_debug_flag() -> None:
+    args = build_parser().parse_args(["meeting.m4a", "--debug"])
+    assert args.debug is True
 
 
 def test_parser_does_not_have_keep_temp() -> None:
