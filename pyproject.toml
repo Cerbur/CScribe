@@ -1,7 +1,7 @@
 [project]
-name = "mimo-transcriber"
+name = "cscribe"
 version = "0.1.0"
-description = "Local multi-speaker M4A diarization and MiMo transcription CLI"
+description = "将多人 M4A 录音按说话人分离，通过 MiMo 转写为带时间戳的中文 TXT"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
