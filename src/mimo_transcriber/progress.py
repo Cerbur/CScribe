@@ -102,6 +102,13 @@ class TerminalProgressReporter:
 
         def _start() -> None:
             if self._rich_available and self._progress is not None:
+                # 将上一个阶段标记为已完成，避免残留 spinner
+                if self._task_slice is not None:
+                    self._progress.update(
+                        self._task_slice,
+                        total=1,
+                        completed=1,
+                    )
                 if not self._progress.task_ids:
                     self._progress.start()
                 self._task_slice = self._progress.add_task(
@@ -150,6 +157,13 @@ class TerminalProgressReporter:
     def finish(self, success_count: int, failure_count: int, elapsed_seconds: float) -> None:
         def _finish() -> None:
             if self._rich_available and self._progress is not None:
+                # 将当前阶段标记为已完成，再停止 live display
+                if self._task_slice is not None:
+                    self._progress.update(
+                        self._task_slice,
+                        total=1,
+                        completed=1,
+                    )
                 self._progress.stop()
             self._write_line(
                 f"已完成｜{success_count} 成功｜{failure_count} 失败｜"
