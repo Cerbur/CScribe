@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from mimo_transcriber.asr.base import RuntimeConfig
 from mimo_transcriber.config import AppConfig
 from mimo_transcriber.devices import DeviceDecision
 from mimo_transcriber.diarization import DiarizationError, DiarizationResult
@@ -57,8 +58,7 @@ async def test_partial_failure_writes_output_and_returns_two(tmp_path: Path) -> 
     )
     result = await run_pipeline(
         AppConfig(input_path=source, output_path=output, num_speakers=2),
-        "mimo",
-        "hf",
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         dependencies,
     )
     assert result.exit_code == 2
@@ -123,8 +123,7 @@ async def test_fail_fast_does_not_write_formal_output(tmp_path: Path) -> None:
                 num_speakers=1,
                 fail_fast=True,
             ),
-            "mimo",
-            "hf",
+            RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
             dependencies,
         )
     assert output.exists() is False
@@ -175,8 +174,7 @@ async def test_pipeline_normalizes_and_creates_preflight_only_once(
             num_speakers=1,
             device="mps",
         ),
-        "mimo",
-        "hf",
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         dependencies,
     )
 
@@ -206,8 +204,7 @@ async def test_fatal_cpu_fallback_failure_stops_before_slicing(
     with pytest.raises(DiarizationError, match="CPU 回退也失败"):
         await run_pipeline(
             AppConfig(input_path=source, device="mps"),
-            "mimo",
-            "hf",
+            RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
             dependencies,
         )
 
@@ -255,8 +252,7 @@ async def test_recovery_skips_ready_normalization_and_diarization(tmp_path: Path
     with pytest.raises(asyncio.CancelledError):
         await run_pipeline(
             AppConfig(input_path=source, output_path=output, num_speakers=2),
-            "mimo",
-            "hf",
+            RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
             deps,
             cache_root=tmp_path,
         )
@@ -281,8 +277,7 @@ async def test_recovery_skips_ready_normalization_and_diarization(tmp_path: Path
 
     await run_pipeline(
         AppConfig(input_path=source, output_path=output, num_speakers=2),
-        "mimo",
-        "hf",
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         recover_deps,
         cache_root=tmp_path,
     )
@@ -325,7 +320,7 @@ async def test_successful_cached_transcript_is_not_requested_again(
 
     config = AppConfig(input_path=source, output_path=output, num_speakers=2)
     with pytest.raises(asyncio.CancelledError):
-        await run_pipeline(config, "mimo", "hf", deps, cache_root=tmp_path)
+        await run_pipeline(config, RuntimeConfig(hf_token="hf", mimo_api_key="mimo"), deps, cache_root=tmp_path)
 
     assert request_counts.get("s0000", 0) == 1
     assert request_counts.get("s0001", 0) == 1
@@ -350,7 +345,7 @@ async def test_successful_cached_transcript_is_not_requested_again(
         transcribe=_recover_transcribe,
     )
 
-    await run_pipeline(config, "mimo", "hf", recover_deps, cache_root=tmp_path)
+    await run_pipeline(config, RuntimeConfig(hf_token="hf", mimo_api_key="mimo"), recover_deps, cache_root=tmp_path)
 
     assert request_counts["s0000"] == 1
     assert request_counts["s0001"] == 1
@@ -416,8 +411,7 @@ async def test_success_removes_task_cache_but_keeps_debug_json_when_requested(
 
     result = await run_pipeline(
         AppConfig(input_path=source, output_path=output, debug_json=True, num_speakers=1),
-        "mimo",
-        "hf",
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         deps,
         cache_root=tmp_path,
     )
@@ -467,8 +461,7 @@ async def test_partial_failure_keeps_cache_and_returns_two(tmp_path: Path) -> No
 
     result = await run_pipeline(
         AppConfig(input_path=source, output_path=output, num_speakers=2),
-        "mimo",
-        "hf",
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         deps,
         cache_root=tmp_path,
     )
@@ -526,7 +519,7 @@ async def test_end_to_end_resume_from_interruption_and_complete(
     config = AppConfig(input_path=source, output_path=output, num_speakers=2)
 
     with pytest.raises(asyncio.CancelledError):
-        await run_pipeline(config, "mimo", "hf", interrupting_deps, cache_root=tmp_path)
+        await run_pipeline(config, RuntimeConfig(hf_token="hf", mimo_api_key="mimo"), interrupting_deps, cache_root=tmp_path)
 
     # Second run: all segments succeed
     async def _recover_transcribe(items, fail_fast):
@@ -546,7 +539,7 @@ async def test_end_to_end_resume_from_interruption_and_complete(
     )
 
     tp = TP.for_run(config, fp(source), tmp_path)
-    second = await run_pipeline(config, "mimo", "hf", recover_deps, cache_root=tmp_path)
+    second = await run_pipeline(config, RuntimeConfig(hf_token="hf", mimo_api_key="mimo"), recover_deps, cache_root=tmp_path)
 
     assert normalize_count == 1
     assert diarize_count == 1

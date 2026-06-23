@@ -10,12 +10,13 @@ from typing import Any, Awaitable, Callable
 
 from mimo_transcriber.audio import create_preflight_sample, normalize_audio, probe_audio, slice_mp3, payload_fits
 from mimo_transcriber.cache import TaskAlreadyRunningError, TaskLock, TaskPaths, fingerprint_input
+from mimo_transcriber.asr.base import AsrConfig, RuntimeConfig
+from mimo_transcriber.asr.factory import create_asr_engine
 from mimo_transcriber.config import AppConfig
 from mimo_transcriber.diarization import DiarizationResult, run_diarization
 from mimo_transcriber.formatter import write_outputs
 from mimo_transcriber.keywords import extract_keywords
 from mimo_transcriber.manifest import ManifestStore, SegmentRecord, TaskIdentity, TaskManifest
-from mimo_transcriber.mimo_asr import MiMoTranscriber, openai_request
 from mimo_transcriber.models import RunSummary, SegmentStatus, SpeakerSegment, TranscriptionOutcome
 from mimo_transcriber.progress import NullProgressReporter, ProgressReporter
 from mimo_transcriber.segments import process_segments, split_segment
@@ -137,8 +138,7 @@ def _manage_target_index(paths: TaskPaths) -> None:
 
 async def run_pipeline(
     config: AppConfig,
-    mimo_key: str,
-    hf_token: str,
+    runtime: RuntimeConfig,
     dependencies: PipelineDependencies = PipelineDependencies(),
     cache_root: Path | None = None,
     reporter: ProgressReporter | None = None,
@@ -197,7 +197,7 @@ async def run_pipeline(
                 diarization = dependencies.diarize(
                     normalized,
                     preflight,
-                    hf_token,
+                    runtime.hf_token,
                     config.device,
                     config.num_speakers,
                     config.min_speakers,
@@ -222,7 +222,7 @@ async def run_pipeline(
                 store=store,
                 paths=paths,
                 dependencies=dependencies,
-                mimo_key=mimo_key,
+                runtime=runtime,
                 reporter=reporter,
             )
 
@@ -286,7 +286,7 @@ async def _run_segment_workers(
     store: ManifestStore,
     paths: TaskPaths,
     dependencies: PipelineDependencies,
-    mimo_key: str,
+    runtime: RuntimeConfig,
     reporter: ProgressReporter,
 ) -> list[SpeakerSegment]:
     import json as _json
@@ -323,15 +323,19 @@ async def _run_segment_workers(
         reporter.segment_completed(True)
     logger.debug("恢复已完成片段: %d", recovered_count)
 
-    # Pre-create MiMoTranscriber for transcription workers
+    # Pre-create ASR engine for transcription workers
     if dependencies.transcribe is None:
-        client = MiMoTranscriber(
-            request=openai_request(mimo_key),
-            language=config.language,
+        client = create_asr_engine(
+            AsrConfig(
+                provider=config.asr,
+                stt_model=config.stt_model,
+                language=config.language,
+            ),
+            runtime,
+            event_sink=None,
             concurrency=config.concurrency,
             requests_per_minute=config.requests_per_minute,
             max_retries=config.max_retries,
-            reporter=reporter,
         )
     else:
         client = None
