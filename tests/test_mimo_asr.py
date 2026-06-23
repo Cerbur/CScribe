@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mimo_transcriber.mimo_asr import MiMoTranscriber, extract_content
+from mimo_transcriber.asr.mimo import MimoAsrEngine, extract_content, openai_request
 from mimo_transcriber.models import SegmentStatus, SpeakerSegment
 from mimo_transcriber.progress import NullProgressReporter
 
@@ -51,8 +51,9 @@ async def test_retries_then_returns_results_in_index_order(tmp_path: Path) -> No
         SpeakerSegment(1, 1, 2, "B"),
         SpeakerSegment(0, 0, 1, "A"),
     ]
-    transcriber = MiMoTranscriber(
+    transcriber = MimoAsrEngine(
         request=request,
+        model="mimo-v2.5-asr",
         language="auto",
         concurrency=1,
         requests_per_minute=1000,
@@ -90,8 +91,9 @@ async def test_retry_events_report_one_through_three(tmp_path: Path) -> None:
     audio_path = tmp_path / "s0000.mp3"
     audio_path.write_bytes(b"audio")
     segment = SpeakerSegment(0, 0, 1, "A", segment_id="s0000")
-    transcriber = MiMoTranscriber(
+    transcriber = MimoAsrEngine(
         request=request,
+        model="mimo-v2.5-asr",
         language="auto",
         concurrency=1,
         requests_per_minute=1000,
@@ -124,8 +126,9 @@ async def test_empty_response_is_not_retried(tmp_path: Path) -> None:
     request_mock = AsyncMock(return_value=SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=" "))]
     ))
-    transcriber = MiMoTranscriber(
+    transcriber = MimoAsrEngine(
         request=request_mock,
+        model="mimo-v2.5-asr",
         language="auto",
         concurrency=1,
         requests_per_minute=1000,
