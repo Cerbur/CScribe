@@ -145,6 +145,13 @@ class TaskLock:
     path: Path
     _fd: int | None = None
 
+    def __enter__(self) -> TaskLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.release()
+
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         run_id = uuid.uuid4().hex
