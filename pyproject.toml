@@ -9,6 +9,7 @@ dependencies = [
   "openai>=1.68.0",
   "pyannote.audio>=3.3.2",
   "python-dotenv>=1.0.1",
+  "rich>=14.0",
   "torch>=2.2",
 ]
 
