@@ -31,7 +31,7 @@ uv run python -m mimo_transcriber meeting.m4a --num-speakers 2
 ```bash
 uv run python -m mimo_transcriber meeting.m4a --num-speakers 3 --language zh
 uv run python -m mimo_transcriber meeting.m4a --language auto
-uv run python -m mimo_transcriber meeting.m4a --debug-json --keep-temp --verbose
+uv run python -m mimo_transcriber meeting.m4a --debug-json --verbose
 uv run python -m mimo_transcriber meeting.m4a --device mps --verbose
 ```
 
@@ -79,10 +79,42 @@ export HF_TOKEN="..."
 | `--requests-per-minute` | `80` | 全局每分钟请求上限 |
 | `--max-retries` | `3` | 首次失败后的最大重试次数 |
 | `--keyword-count` | `20` | 关键词数量 |
-| `--keep-temp` | 关闭 | 保留 WAV/MP3 临时文件 |
 | `--debug-json` | 关闭 | 额外生成 `.segments.json` |
 | `--fail-fast` | 关闭 | 首段最终失败即停止且不写正式 TXT |
 | `-v, --verbose` | 关闭 | 输出调试日志和阶段耗时 |
+
+## 终端进度显示
+
+交互终端（TTY）中显示单行动态进度，包含当前阶段、已用时间、切片和转写完成数量，以及最近发生的重试事件。非交互终端或输出重定向场景自动退化为普通日志。
+
+```text
+⠹ 正在进行说话人分离｜已用时 01:42
+⠸ 正在处理音频片段｜切片 18/37｜转写 12/37
+⠼ 正在处理音频片段｜切片 20/37｜转写 12/37｜s0016 重试 2/3
+✓ 已完成｜36 成功｜1 失败｜耗时 03:26
+```
+
+进度输出使用标准错误流，不影响标准输出的机器可读内容。进度组件渲染故障不会中断转写或改变退出码。
+
+## 并发流水线
+
+说话人分离完成后，最多两个 FFmpeg 切片 worker 与 `--concurrency` 个 MiMo 转录 worker 以有界流水线并发执行。切片完成后立即进入转录队列，不等待全部切片结束。转录队列容量固定为 `max(2, 2 × --concurrency)`，形成背压避免长录音一次性堆积大量待发送数据。
+
+## 自动恢复
+
+相同任务中断后重新执行相同命令会自动续跑，复用所有已验证的前序产物和成功转录文本：
+
+- 标准化音频和说话人分离结果有效时跳过重新生成。
+- 已成功转录的片段永不重复请求 MiMo。
+- 失败和未处理的片段在新进程中重新获得完整请求次数（首次请求 + 最多 3 次重试）。
+
+缓存位于 `/tmp/cscribe/<task-hash>/`，恢复是尽力而为：操作系统可能随时清理 `/tmp`。缓存缺失时程序安全地从头运行，不视为异常。
+
+## 缓存清理与部分失败
+
+- 全部片段成功：主动删除 `/tmp/cscribe/<task-hash>/` 工作目录，目标目录只保留正式 TXT 和显式指定的 `.segments.json`。
+- 部分失败：保留工作目录，原子生成包含 `[该片段识别失败]` 的 TXT，退出码为 `2`。下次相同命令只重试失败片段。
+- 同一任务的第二个进程被拒绝，避免重复发送 API 请求。
 
 ## 输出与退出码
 
@@ -97,6 +129,17 @@ MPS 不可用、预检失败或完整运行失败时，程序会自动回退 CPU
 应用只提供诊断，不会自动更换 PyTorch 或修改 macOS。兼容性取决于 Apple 芯片、macOS、Python、PyTorch 与 pyannote 的具体版本组合。
 
 评估一台机器是否值得使用 MPS 时，使用同一段 1～3 分钟、至少两位说话人的录音分别运行 CPU 和 MPS 各三次。比较 diarization 中位耗时；只有 MPS 稳定完成且至少快 20% 时才建议日常使用。
+
+```bash
+# 从录音中截取 3 分钟基准样本（调整 -ss 到有对话的时间点）
+ffmpeg -y -ss 300 -t 180 -i meeting.m4a -c:a aac /tmp/benchmark.m4a
+
+# CPU 基准（运行三次，记录中位 diarization 耗时）
+uv run python -m mimo_transcriber /tmp/benchmark.m4a --num-speakers 2 --device cpu --verbose
+
+# MPS 基准（运行三次，比较中位耗时是否 ≥20% 降低）
+uv run python -m mimo_transcriber /tmp/benchmark.m4a --num-speakers 2 --device mps --verbose
+```
 
 ## 常见问题
 

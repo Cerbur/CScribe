@@ -475,3 +475,83 @@ async def test_partial_failure_keeps_cache_and_returns_two(tmp_path: Path) -> No
     assert result.exit_code == 2
     assert tp.work_dir.exists()
     assert "[该片段识别失败]" in output.read_text()
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_resume_from_interruption_and_complete(
+    tmp_path: Path,
+) -> None:
+    """Simulate interruption after one segment succeeds, then recover."""
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 3, "aac", 48000, 2, None)
+
+    from mimo_transcriber.cache import TaskPaths as TP, fingerprint_input as fp
+
+    request_counts: dict[str, int] = {}
+    normalize_count = 0
+    diarize_count = 0
+
+    def _normalize(src: Path, target: Path) -> None:
+        nonlocal normalize_count
+        normalize_count += 1
+        target.write_bytes(b"wav")
+
+    def _diarize(*args, **kwargs):
+        nonlocal diarize_count
+        diarize_count += 1
+        return diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+            SpeakerSegment(-1, 1.5, 2.5, "B"),
+        ])
+
+    async def _interrupting_transcribe(items, fail_fast):
+        segment = items[0][0]
+        request_counts[segment.segment_id] = request_counts.get(segment.segment_id, 0) + 1
+        segment.text = "ok"
+        segment.status = SegmentStatus.SUCCESS
+        raise asyncio.CancelledError()
+
+    interrupting_deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=_normalize,
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=_diarize,
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        payload_fits=lambda path, seg: True,
+        transcribe=_interrupting_transcribe,
+    )
+
+    config = AppConfig(input_path=source, output_path=output, num_speakers=2)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_pipeline(config, "mimo", "hf", interrupting_deps, cache_root=tmp_path)
+
+    # Second run: all segments succeed
+    async def _recover_transcribe(items, fail_fast):
+        segment = items[0][0]
+        request_counts[segment.segment_id] = request_counts.get(segment.segment_id, 0) + 1
+        segment.text = "完成"
+        segment.status = SegmentStatus.SUCCESS
+        return [segment]
+
+    recover_deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=_normalize,
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=_diarize,
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        transcribe=_recover_transcribe,
+    )
+
+    tp = TP.for_run(config, fp(source), tmp_path)
+    second = await run_pipeline(config, "mimo", "hf", recover_deps, cache_root=tmp_path)
+
+    assert normalize_count == 1
+    assert diarize_count == 1
+    assert request_counts.get("s0000", 0) == 1
+    assert request_counts.get("s0001", 0) == 1
+    assert second.exit_code == 0
+    assert output.exists()
+    assert not tp.work_dir.exists()
