@@ -39,6 +39,16 @@ class AppConfig:
     def resolved_output_path(self) -> Path:
         return self.output_path or self.input_path.with_suffix(".txt")
 
+    def cache_parameters(self) -> dict[str, object]:
+        return {
+            "num_speakers": self.num_speakers,
+            "min_speakers": self.min_speakers,
+            "max_speakers": self.max_speakers,
+            "language": self.language,
+            "device": self.device,
+            "keyword_count": self.keyword_count,
+        }
+
     def validate_arguments(self) -> None:
         if self.num_speakers is not None and self.num_speakers <= 0:
             raise ConfigError("--num-speakers 必须大于 0")
