@@ -289,3 +289,92 @@ async def test_recovery_skips_ready_normalization_and_diarization(tmp_path: Path
     assert norm_calls == 1
     assert diar_calls == 1
     assert output.exists()
+
+
+@pytest.mark.asyncio
+async def test_successful_cached_transcript_is_not_requested_again(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 3, "aac", 48000, 2, None)
+
+    request_counts: dict[str, int] = {}
+
+    async def _transcribe_counting(items, fail_fast):
+        for seg, _path in items:
+            request_counts[seg.segment_id] = request_counts.get(seg.segment_id, 0) + 1
+            seg.text = "ok"
+            seg.status = SegmentStatus.SUCCESS
+        raise asyncio.CancelledError()
+
+    deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda src, target: target.write_bytes(b"wav"),
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+            SpeakerSegment(-1, 1.5, 2.5, "B"),
+        ]),
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        payload_fits=lambda path, seg: True,
+        transcribe=_transcribe_counting,
+    )
+
+    config = AppConfig(input_path=source, output_path=output, num_speakers=2)
+    with pytest.raises(asyncio.CancelledError):
+        await run_pipeline(config, "mimo", "hf", deps, cache_root=tmp_path)
+
+    assert request_counts.get("s0000", 0) == 1
+    assert request_counts.get("s0001", 0) == 1
+
+    async def _recover_transcribe(items, fail_fast):
+        for seg, _path in items:
+            request_counts[seg.segment_id] = request_counts.get(seg.segment_id, 0) + 1
+            seg.text = "完成"
+            seg.status = SegmentStatus.SUCCESS
+        return [item[0] for item in items]
+
+    recover_deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda src, target: target.write_bytes(b"wav"),
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+            SpeakerSegment(-1, 1.5, 2.5, "B"),
+        ]),
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        payload_fits=lambda path, seg: True,
+        transcribe=_recover_transcribe,
+    )
+
+    await run_pipeline(config, "mimo", "hf", recover_deps, cache_root=tmp_path)
+
+    assert request_counts["s0000"] == 1
+    assert request_counts["s0001"] == 1
+
+
+def test_oversize_segment_retains_stable_base_id_and_derives_children(
+    tmp_path: Path,
+) -> None:
+    normalized = tmp_path / "normalized.wav"
+    normalized.write_bytes(b"wav")
+
+    def slice_audio(source: Path, segment: SpeakerSegment, target: Path) -> None:
+        target.write_bytes(b"mp3")
+
+    def fits(path: Path, segment: SpeakerSegment) -> bool:
+        return segment.duration <= 7.0
+
+    items = prepare_audio_segments(
+        normalized,
+        [SpeakerSegment(0, 0, 10, "A", segment_id="s0000")],
+        tmp_path,
+        slice_audio,
+        fits,
+    )
+    assert len(items) == 2
+    child_ids = {item.segment_id for item, _ in items}
+    assert "s0000.0" in child_ids
+    assert "s0000.1" in child_ids

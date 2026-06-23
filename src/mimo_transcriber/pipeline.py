@@ -172,37 +172,19 @@ async def run_pipeline(
 
             reporter.set_segment_total(len(segments))
 
-            # Stage 5: Slice and transcribe
+            # Stage 5: Slice and transcribe with bounded pipeline
             reporter.start_stage("正在处理音频片段")
-            items = prepare_audio_segments(
-                normalized,
-                segments,
-                paths.work_dir,
-                dependencies.slice_audio,
-                dependencies.payload_fits,
+            completed = await _run_segment_workers(
+                config=config,
+                normalized=normalized,
+                segments=segments,
+                manifest=manifest,
+                store=store,
+                paths=paths,
+                dependencies=dependencies,
+                mimo_key=mimo_key,
+                reporter=reporter,
             )
-
-            transcribe = dependencies.transcribe
-            if transcribe is None:
-                client = MiMoTranscriber(
-                    request=openai_request(mimo_key),
-                    language=config.language,
-                    concurrency=config.concurrency,
-                    requests_per_minute=config.requests_per_minute,
-                    max_retries=config.max_retries,
-                    reporter=reporter,
-                )
-                transcribe = client.transcribe_all
-
-            completed = await transcribe(items, config.fail_fast)
-
-            for seg in completed:
-                for record in manifest.segments:
-                    if record.segment.segment_id == seg.segment_id:
-                        record.text = seg.text
-                        record.transcript_status = str(seg.status)
-                        record.error = seg.error
-                        break
 
             outcome_has_failure = any(
                 item.status is SegmentStatus.FAILED for item in completed
@@ -250,6 +232,249 @@ async def run_pipeline(
     except TaskAlreadyRunningError:
         reporter.close()
         raise
+
+
+async def _run_segment_workers(
+    config: AppConfig,
+    normalized: Path,
+    segments: list[SpeakerSegment],
+    manifest: TaskManifest,
+    store: ManifestStore,
+    paths: TaskPaths,
+    dependencies: PipelineDependencies,
+    mimo_key: str,
+    reporter: ProgressReporter,
+) -> list[SpeakerSegment]:
+    import json as _json
+    import os as _os
+
+    # Determine work items from manifest records
+    slice_queue: asyncio.Queue[SegmentRecord | None] = asyncio.Queue()
+    transcribe_queue: asyncio.Queue[tuple[SegmentRecord, Path] | None] = asyncio.Queue(
+        maxsize=max(2, 2 * config.concurrency)
+    )
+
+    completed: dict[str, SpeakerSegment] = {}
+    cancel_event = asyncio.Event()
+
+    # Count recovered (already successful) segments
+    recovered_count = 0
+    segments_by_id: dict[str, SpeakerSegment] = {s.segment_id: s for s in segments}
+
+    # Ensure manifest records match current segments
+    existing_ids = {r.segment.segment_id: r for r in manifest.segments}
+    work_items: list[SegmentRecord] = []
+    for seg in segments:
+        record = existing_ids.get(seg.segment_id, SegmentRecord.from_segment(seg))
+        record.segment = seg
+        work_items.append(record)
+        # Count already-successful transcripts
+        if record.transcript_status == "success":
+            completed[seg.segment_id] = seg
+            recovered_count += 1
+    manifest.segments = work_items
+    store.save(manifest)
+
+    for _ in range(recovered_count):
+        reporter.segment_completed(True)
+    logger.debug("恢复已完成片段: %d", recovered_count)
+
+    # Pre-create MiMoTranscriber for transcription workers
+    if dependencies.transcribe is None:
+        client = MiMoTranscriber(
+            request=openai_request(mimo_key),
+            language=config.language,
+            concurrency=config.concurrency,
+            requests_per_minute=config.requests_per_minute,
+            max_retries=config.max_retries,
+            reporter=reporter,
+        )
+    else:
+        client = None
+
+    # Enqueue work: pending/failed segments need slicing; ready slices go direct to transcription
+    pending = 0
+    paths.audio_dir.mkdir(parents=True, exist_ok=True)
+    paths.transcripts_dir.mkdir(parents=True, exist_ok=True)
+    for record in work_items:
+        if record.segment.segment_id in completed:
+            continue
+        if record.slice_status == "ready":
+            audio_path = paths.audio_dir / f"{record.segment.segment_id}.mp3"
+            if audio_path.exists() and audio_path.stat().st_size > 0:
+                await transcribe_queue.put((record, audio_path))
+                pending += 1
+                continue
+        # Need slicing
+        record.slice_status = "pending"
+        record.slice_bytes = 0
+        slice_queue.put_nowait(record)
+        pending += 1
+
+    if pending == 0:
+        logger.debug("所有片段已完成，无待处理工作")
+        return sorted(
+            [s for s in segments],
+            key=lambda s: s.sort_key(),
+        )
+
+    # Slice worker
+    async def _slice_worker() -> None:
+        while True:
+            record = await slice_queue.get()
+            if record is None or cancel_event.is_set():
+                slice_queue.task_done()
+                break
+            try:
+                seg = record.segment
+                if seg.segment_id in segments_by_id:
+                    seg = segments_by_id[seg.segment_id]
+                candidate = paths.audio_dir / f"{seg.segment_id}_tmp.mp3"
+                target = paths.audio_dir / f"{seg.segment_id}.mp3"
+
+                await asyncio.to_thread(dependencies.slice_audio, normalized, seg, candidate)
+
+                if dependencies.payload_fits(candidate, seg):
+                    size = candidate.stat().st_size
+                    _os.replace(candidate, target)
+                    record.slice_status = "ready"
+                    record.slice_bytes = size
+                    store.save(manifest)
+                    reporter.segment_sliced()
+                    await transcribe_queue.put((record, target))
+                else:
+                    candidate.unlink(missing_ok=True)
+                    children = split_segment(seg)
+                    child_records = [SegmentRecord.from_segment(c) for c in children]
+                    # Replace parent record in manifest with children atomically
+                    idx = next(i for i, r in enumerate(manifest.segments) if r.segment.segment_id == record.segment.segment_id)
+                    manifest.segments[idx:idx + 1] = child_records
+                    reporter.set_segment_total(len(manifest.segments))
+                    store.save(manifest)
+                    for cr in child_records:
+                        if cr.segment.segment_id not in segments_by_id:
+                            segments_by_id[cr.segment.segment_id] = cr.segment
+                        slice_queue.put_nowait(cr)
+            except Exception as exc:
+                logger.error("切片失败 %s: %s", record.segment.segment_id, exc)
+                record.slice_status = "failed"
+                record.error = str(exc)
+                store.save(manifest)
+                reporter.segment_sliced()
+                reporter.segment_completed(False)
+                completed[record.segment.segment_id] = record.segment
+            finally:
+                slice_queue.task_done()
+
+    # Transcription worker
+    async def _transcribe_worker() -> None:
+        while True:
+            entry = await transcribe_queue.get()
+            if entry is None or cancel_event.is_set():
+                transcribe_queue.task_done()
+                break
+            record, audio_path = entry
+            try:
+                try:
+                    if client is not None:
+                        result = await client.transcribe_one(record.segment, audio_path)
+                        record.text = result.text
+                        record.transcript_status = str(result.status) if hasattr(result, 'status') else "success"
+                        record.error = result.error if hasattr(result, 'error') else None
+                    else:
+                        batch_result = await dependencies.transcribe(
+                            [(record.segment, audio_path)], False
+                        )
+                        result = batch_result[0] if isinstance(batch_result, list) else batch_result
+                        record.text = result.text
+                        record.transcript_status = str(result.status) if hasattr(result, 'status') else "success"
+                        record.error = result.error if hasattr(result, 'error') else None
+
+                    if record.segment.segment_id in segments_by_id:
+                        segments_by_id[record.segment.segment_id].text = record.text
+                        segments_by_id[record.segment.segment_id].status = SegmentStatus(
+                            record.transcript_status
+                        )
+
+                    completed[record.segment.segment_id] = record.segment
+                    store.save(manifest)
+                except asyncio.CancelledError:
+                    # Sync record from segment in case it was modified in-place before cancel
+                    record.text = record.segment.text
+                    record.transcript_status = str(record.segment.status)
+                    if record.segment.segment_id in segments_by_id:
+                        segments_by_id[record.segment.segment_id].text = record.text
+                        segments_by_id[record.segment.segment_id].status = SegmentStatus(
+                            record.transcript_status
+                        )
+                    completed[record.segment.segment_id] = record.segment
+                    store.save(manifest)
+                    raise
+                except Exception as exc:
+                    if config.fail_fast:
+                        cancel_event.set()
+                    logger.error("转写失败 %s: %s", record.segment.segment_id, exc)
+                    record.transcript_status = "failed"
+                    record.error = str(exc)
+                    record.segment.text = "[该片段识别失败]"
+                    record.segment.status = SegmentStatus.FAILED
+                    completed[record.segment.segment_id] = record.segment
+                    store.save(manifest)
+            finally:
+                transcribe_queue.task_done()
+
+    # Start workers
+    slice_workers = [asyncio.create_task(_slice_worker()) for _ in range(2)]
+    transcribe_workers = [
+        asyncio.create_task(_transcribe_worker())
+        for _ in range(config.concurrency)
+    ]
+
+    try:
+        # Wait for all work to be queued
+        await slice_queue.join()
+        # Signal slice workers to stop
+        for _ in slice_workers:
+            slice_queue.put_nowait(None)
+        await asyncio.gather(*slice_workers)
+
+        # Wait for transcription to complete
+        await transcribe_queue.join()
+        for _ in transcribe_workers:
+            transcribe_queue.put_nowait(None)
+        await asyncio.gather(*transcribe_workers)
+
+    except asyncio.CancelledError:
+        cancel_event.set()
+        # Drain queues and cancel workers
+        while not slice_queue.empty():
+            slice_queue.get_nowait()
+            slice_queue.task_done()
+        while not transcribe_queue.empty():
+            transcribe_queue.get_nowait()
+            transcribe_queue.task_done()
+        for w in slice_workers + transcribe_workers:
+            w.cancel()
+        await asyncio.gather(*slice_workers, *transcribe_workers, return_exceptions=True)
+        store.save(manifest)
+        raise
+
+    if cancel_event.is_set() and config.fail_fast:
+        store.save(manifest)
+        # Find the first failed segment error
+        for record in manifest.segments:
+            if record.transcript_status == "failed":
+                raise RuntimeError(record.error or "片段识别失败")
+
+    # Return completed segments sorted by sort_key
+    result_segments = [
+        segments_by_id.get(sid, completed.get(sid, seg))
+        for sid, seg in [(s.segment_id, s) for s in segments]
+    ]
+    return sorted(
+        [s for s in result_segments if s is not None],
+        key=lambda s: s.sort_key(),
+    )
 
 
 def _cleanup_task(paths: TaskPaths) -> None:
