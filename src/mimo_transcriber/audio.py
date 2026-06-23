@@ -64,6 +64,29 @@ def normalize_audio(source: Path, target: Path) -> None:
     ])
 
 
+def create_preflight_sample(
+    source: Path,
+    target: Path,
+    duration_seconds: float = 10.0,
+) -> None:
+    _run([
+        "ffmpeg",
+        "-y",
+        "-t",
+        f"{duration_seconds:.3f}",
+        "-i",
+        str(source),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(target),
+    ])
+
+
 def slice_mp3(source: Path, segment: SpeakerSegment, target: Path) -> None:
     _run([
         "ffmpeg", "-y", "-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}",
