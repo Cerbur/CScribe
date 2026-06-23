@@ -34,14 +34,15 @@ async def test_partial_failure_writes_output_and_returns_two(tmp_path: Path) -> 
     metadata = AudioMetadata(source, 2, "aac", 48000, 2, datetime(2026, 1, 1, 9))
 
     async def transcribe(items, fail_fast):
-        successful = items[0][0]
-        successful.text = "你好"
-        successful.status = SegmentStatus.SUCCESS
-        failed = items[1][0]
-        failed.text = "[该片段识别失败]"
-        failed.status = SegmentStatus.FAILED
-        failed.error = "timeout"
-        return [successful, failed]
+        segment = items[0][0]
+        if segment.segment_id == "s0000":
+            segment.text = "你好"
+            segment.status = SegmentStatus.SUCCESS
+        else:
+            segment.text = "[该片段识别失败]"
+            segment.status = SegmentStatus.FAILED
+            segment.error = "timeout"
+        return [segment]
 
     dependencies = PipelineDependencies(
         probe=lambda path: metadata,
@@ -378,3 +379,99 @@ def test_oversize_segment_retains_stable_base_id_and_derives_children(
     child_ids = {item.segment_id for item, _ in items}
     assert "s0000.0" in child_ids
     assert "s0000.1" in child_ids
+
+
+@pytest.mark.asyncio
+async def test_success_removes_task_cache_but_keeps_debug_json_when_requested(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 1, "aac", 48000, 2, None)
+
+    async def _transcribe_ok(items, fail_fast):
+        seg = items[0][0]
+        seg.text = "你好"
+        seg.status = SegmentStatus.SUCCESS
+        return [seg]
+
+    deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda src, target: target.write_bytes(b"wav"),
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+        ]),
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        transcribe=_transcribe_ok,
+    )
+
+    from mimo_transcriber.cache import TaskPaths as TP, fingerprint_input as fp
+    tp = TP.for_run(
+        AppConfig(input_path=source, output_path=output, debug_json=True),
+        fp(source),
+        tmp_path,
+    )
+
+    result = await run_pipeline(
+        AppConfig(input_path=source, output_path=output, debug_json=True, num_speakers=1),
+        "mimo",
+        "hf",
+        deps,
+        cache_root=tmp_path,
+    )
+    assert result.exit_code == 0
+    assert output.exists()
+    assert output.with_suffix(".segments.json").exists()
+    assert not tp.work_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_partial_failure_keeps_cache_and_returns_two(tmp_path: Path) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 2, "aac", 48000, 2, datetime(2026, 1, 1, 9))
+
+    from mimo_transcriber.cache import TaskPaths as TP, fingerprint_input as fp
+
+    async def _transcribe_partial(items, fail_fast):
+        segment = items[0][0]
+        if segment.segment_id == "s0000":
+            segment.text = "你好"
+            segment.status = SegmentStatus.SUCCESS
+        else:
+            segment.text = "[该片段识别失败]"
+            segment.status = SegmentStatus.FAILED
+            segment.error = "timeout"
+        return [segment]
+
+    deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda src, target: target.write_bytes(b"wav"),
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+            SpeakerSegment(-1, 1, 2, "B"),
+        ]),
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        transcribe=_transcribe_partial,
+    )
+
+    tp = TP.for_run(
+        AppConfig(input_path=source, output_path=output, num_speakers=2),
+        fp(source),
+        tmp_path,
+    )
+
+    result = await run_pipeline(
+        AppConfig(input_path=source, output_path=output, num_speakers=2),
+        "mimo",
+        "hf",
+        deps,
+        cache_root=tmp_path,
+    )
+    assert result.exit_code == 2
+    assert tp.work_dir.exists()
+    assert "[该片段识别失败]" in output.read_text()

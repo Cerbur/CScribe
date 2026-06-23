@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from mimo_transcriber.cache import TaskAlreadyRunningError
 from mimo_transcriber.config import AppConfig, ConfigError, validate_runtime
 from mimo_transcriber.pipeline import run_pipeline
+from mimo_transcriber.progress import TerminalProgressReporter
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +33,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--requests-per-minute", type=int, default=80)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--keyword-count", type=int, default=20)
-    parser.add_argument("--keep-temp", action="store_true")
     parser.add_argument("--debug-json", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -56,14 +57,15 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         requests_per_minute=args.requests_per_minute,
         max_retries=args.max_retries,
         keyword_count=args.keyword_count,
-        keep_temp=args.keep_temp,
         debug_json=args.debug_json,
         fail_fast=args.fail_fast,
         verbose=args.verbose,
     )
+
+    reporter = TerminalProgressReporter(sys.stderr)
     try:
         mimo_key, hf_token = validate_runtime(config)
-        result = await run_pipeline(config, mimo_key, hf_token)
+        result = await run_pipeline(config, mimo_key, hf_token, reporter=reporter)
         logging.info("输出文件: %s", result.outcome.summary.output_path)
         logging.info(
             "片段: %d 成功 / %d 失败；耗时 %.2f 秒",
@@ -72,11 +74,19 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
             result.outcome.summary.elapsed_seconds,
         )
         return result.exit_code
+    except TaskAlreadyRunningError:
+        logging.error("相同任务正在运行，请等待前一次任务完成")
+        return 1
     except (ConfigError, RuntimeError) as exc:
         logging.error("%s", exc)
         if args.verbose:
             logging.exception("详细错误")
         return 1
+    except asyncio.CancelledError:
+        logging.info("用户中断，已保留工作目录供后续恢复")
+        return 130
+    finally:
+        reporter.close()
 
 
 def main() -> None:

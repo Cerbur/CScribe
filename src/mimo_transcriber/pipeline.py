@@ -229,6 +229,10 @@ async def run_pipeline(
 
             return PipelineResult(outcome, exit_code)
 
+    except asyncio.CancelledError:
+        reporter.finish(0, 0, time.monotonic() - started)
+        reporter.close()
+        raise
     except TaskAlreadyRunningError:
         reporter.close()
         raise

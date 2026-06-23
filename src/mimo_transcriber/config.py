@@ -30,7 +30,6 @@ class AppConfig:
     requests_per_minute: int = 80
     max_retries: int = 3
     keyword_count: int = 20
-    keep_temp: bool = False
     debug_json: bool = False
     fail_fast: bool = False
     verbose: bool = False
