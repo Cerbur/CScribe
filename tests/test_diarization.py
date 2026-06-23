@@ -1,7 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from mimo_transcriber.diarization import diarize_audio
+import pytest
+
+from mimo_transcriber.diarization import (
+    DiarizationError,
+    apply_diarization_pipeline,
+)
 
 
 class Annotation:
@@ -12,25 +17,45 @@ class Annotation:
 
 class Pipeline:
     def __init__(self) -> None:
-        self.kwargs = {}
+        self.calls: list[tuple[str, dict[str, int]]] = []
 
     def __call__(self, path: str, **kwargs):
-        self.kwargs = kwargs
+        self.calls.append((path, kwargs))
         return SimpleNamespace(speaker_diarization=Annotation())
 
 
-def test_adapter_extracts_current_community_output() -> None:
+def test_adapter_uses_supplied_pipeline_and_exact_speaker_count() -> None:
     pipeline = Pipeline()
-    result = diarize_audio(
+    result = apply_diarization_pipeline(
         Path("normalized.wav"),
-        token="secret",
-        device="cpu",
+        pipeline,
         num_speakers=2,
         min_speakers=1,
         max_speakers=6,
-        pipeline_factory=lambda token, device: pipeline,
     )
     assert [(item.start, item.end, item.raw_speaker) for item in result] == [
         (0.2, 1.8, "SPEAKER_07")
     ]
-    assert pipeline.kwargs == {"num_speakers": 2}
+    assert pipeline.calls == [("normalized.wav", {"num_speakers": 2})]
+
+
+def test_adapter_uses_minimum_and_maximum_when_count_is_unknown() -> None:
+    pipeline = Pipeline()
+    apply_diarization_pipeline(
+        Path("normalized.wav"),
+        pipeline,
+        num_speakers=None,
+        min_speakers=2,
+        max_speakers=4,
+    )
+    assert pipeline.calls == [
+        ("normalized.wav", {"min_speakers": 2, "max_speakers": 4})
+    ]
+
+
+def test_adapter_wraps_pipeline_failure() -> None:
+    def fail(path: str, **kwargs):
+        raise RuntimeError("backend failed")
+
+    with pytest.raises(DiarizationError, match="说话人分离失败"):
+        apply_diarization_pipeline(Path("normalized.wav"), fail, 2, 1, 6)
