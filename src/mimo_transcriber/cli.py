@@ -32,6 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--requests-per-minute", type=int, default=20)
     parser.add_argument("--max-retries", type=int, default=3)
+    parser.add_argument("--asr", choices=("mlx", "mimo"), default="mlx")
+    parser.add_argument("--stt-model")
     parser.add_argument("--keyword-count", type=int, default=20)
     parser.add_argument("--debug-json", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
@@ -103,6 +105,8 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         concurrency=args.concurrency,
         requests_per_minute=args.requests_per_minute,
         max_retries=args.max_retries,
+        asr=args.asr,
+        stt_model=args.stt_model,
         keyword_count=args.keyword_count,
         debug_json=args.debug_json,
         fail_fast=args.fail_fast,
@@ -112,8 +116,8 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
 
     reporter = TerminalProgressReporter(sys.stderr)
     try:
-        mimo_key, hf_token = validate_runtime(config)
-        result = await run_pipeline(config, mimo_key, hf_token, reporter=reporter)
+        runtime = validate_runtime(config)
+        result = await run_pipeline(config, runtime, reporter=reporter)
         print(f"输出文件: {result.outcome.summary.output_path}", file=sys.stderr)
         return result.exit_code
     except TaskAlreadyRunningError:

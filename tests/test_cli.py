@@ -29,3 +29,23 @@ def test_parser_does_not_have_keep_temp() -> None:
     parser = build_parser()
     actions = [action.dest for action in parser._actions]
     assert "keep_temp" not in actions
+
+
+def test_parser_defaults_to_mlx_asr() -> None:
+    args = build_parser().parse_args(["meeting.m4a"])
+
+    assert args.asr == "mlx"
+    assert args.stt_model is None
+
+
+def test_parser_accepts_mimo_asr_and_model() -> None:
+    args = build_parser().parse_args([
+        "meeting.m4a",
+        "--asr",
+        "mimo",
+        "--stt-model",
+        "mimo-v2.5-asr",
+    ])
+
+    assert args.asr == "mimo"
+    assert args.stt_model == "mimo-v2.5-asr"
