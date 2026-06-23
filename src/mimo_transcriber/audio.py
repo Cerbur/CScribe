@@ -87,3 +87,8 @@ def workspace(keep: bool) -> Iterator[Path]:
         return
     with tempfile.TemporaryDirectory(prefix="mimo-transcriber-") as value:
         yield Path(value)
+
+
+def payload_fits(path: Path, segment: SpeakerSegment) -> bool:
+    encoded = base64.b64encode(path.read_bytes())
+    return len(encoded) <= MAX_BASE64_BYTES

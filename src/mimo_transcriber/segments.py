@@ -122,3 +122,11 @@ def _split_long(
             SpeakerSegment(-1, start, item.end, item.raw_speaker, item.display_speaker)
         )
     return result
+
+
+def split_segment(segment: SpeakerSegment) -> list[SpeakerSegment]:
+    midpoint = segment.start + segment.duration / 2
+    return [
+        SpeakerSegment(-1, segment.start, midpoint, segment.raw_speaker, segment.display_speaker),
+        SpeakerSegment(-1, midpoint, segment.end, segment.raw_speaker, segment.display_speaker),
+    ]
