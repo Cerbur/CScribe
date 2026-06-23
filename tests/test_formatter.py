@@ -38,3 +38,16 @@ def test_renders_exact_transcript_layout() -> None:
         "关键词:\nAgent、RAG\n\n"
         "文字记录:\n说话人 1 00:02\n你好。\n"
     )
+
+
+def test_render_transcript_uses_time_then_segment_id_order() -> None:
+    metadata = AudioMetadata(Path("input.m4a"), 3, "aac", 48_000, 2, None)
+    outcome = TranscriptionOutcome(
+        metadata=metadata,
+        segments=[
+            SpeakerSegment(1, 2, 3, "B", "说话人 2", "后", segment_id="s0001"),
+            SpeakerSegment(0, 0, 1, "A", "说话人 1", "先", segment_id="s0000"),
+        ],
+    )
+    rendered = render_transcript(outcome, datetime(2026, 6, 15, 10, 0))
+    assert rendered.index("先") < rendered.index("后")

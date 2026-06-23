@@ -23,6 +23,7 @@ def process_segments(
     split = _split_long(merged, max_duration)
     for index, item in enumerate(split):
         item.index = index
+        item.segment_id = f"s{index:04d}"
     return split
 
 
@@ -127,6 +128,14 @@ def _split_long(
 def split_segment(segment: SpeakerSegment) -> list[SpeakerSegment]:
     midpoint = segment.start + segment.duration / 2
     return [
-        SpeakerSegment(-1, segment.start, midpoint, segment.raw_speaker, segment.display_speaker),
-        SpeakerSegment(-1, midpoint, segment.end, segment.raw_speaker, segment.display_speaker),
+        SpeakerSegment(
+            -1, segment.start, midpoint,
+            segment.raw_speaker, segment.display_speaker,
+            segment_id=f"{segment.segment_id}.0",
+        ),
+        SpeakerSegment(
+            -1, midpoint, segment.end,
+            segment.raw_speaker, segment.display_speaker,
+            segment_id=f"{segment.segment_id}.1",
+        ),
     ]

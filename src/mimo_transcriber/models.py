@@ -32,10 +32,14 @@ class SpeakerSegment:
     text: str | None = None
     status: SegmentStatus = SegmentStatus.PENDING
     error: str | None = None
+    segment_id: str = ""
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    def sort_key(self) -> tuple[float, float, str]:
+        return (self.start, self.end, self.segment_id)
 
 
 @dataclass

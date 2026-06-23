@@ -42,9 +42,10 @@ def render_transcript(outcome: TranscriptionOutcome, recording_time: datetime) -
         f"{format_recording_time(recording_time)}|"
         f"{format_duration(outcome.metadata.duration_seconds)}"
     )
+    ordered = sorted(outcome.segments, key=lambda s: s.sort_key())
     blocks = [
         f"{segment.display_speaker} {format_timestamp(segment.start)}\n{segment.text or ''}"
-        for segment in outcome.segments
+        for segment in ordered
     ]
     transcript = "\n\n".join(blocks)
     return (
