@@ -1,151 +1,97 @@
 # CScribe
 
-一个本地运行的 Python CLI：使用 FFmpeg 标准化 M4A，使用 pyannote 按音色区分说话人，将切割后的短 MP3 片段发送给 MiMo-V2.5-ASR，最后生成带说话人、时间戳和关键词的 UTF-8 TXT。
+本地运行的多人录音转写 CLI。CScribe 使用 pyannote 区分说话人，将切分后的音频片段发送给 MiMo ASR，并生成带时间戳、说话人和关键词的 TXT。
 
-完整原始录音不会直接发送给 MiMo；只有 diarization 后的音频片段会上传。
+完整原始录音不会直接上传，只有说话人分离后的短音频片段会发送给 MiMo API。
+
+## 功能
+
+- 多说话人分离，支持指定或自动估计说话人数
+- 中文、英文和自动语言识别
+- 并发转写、限流、失败重试和中断续跑
+- 输出带时间戳、说话人和关键词的 UTF-8 TXT
+- 支持 CPU、CUDA，以及实验性的 Apple MPS
+- 可选输出片段级调试 JSON
 
 ## Quick Start
 
+需要 Python 3.11、[uv](https://docs.astral.sh/uv/) 和 FFmpeg。
+
 ```bash
+# macOS
 brew install ffmpeg
+
+# Ubuntu / Debian
+# sudo apt-get update && sudo apt-get install -y ffmpeg
+
 uv sync
-export MIMO_API_KEY="..."
-export HF_TOKEN="..."
-uv run python -m mimo_transcriber meeting.m4a --num-speakers 2
+cp .env.example .env
 ```
 
-## 环境要求
+在 `.env` 中填写：
 
-- Python 3.11
-- uv
-- FFmpeg 与 ffprobe
-- macOS Apple Silicon 默认使用 CPU，可显式试用实验性 MPS
-- Linux 可选 NVIDIA CUDA
+```dotenv
+MIMO_API_KEY=你的_MiMo_API_Key
+HF_TOKEN=你的_Hugging_Face_Token
+```
 
-## Hugging Face 授权
-
-登录 Hugging Face，接受 `pyannote/speaker-diarization-community-1` 的模型条款，然后创建 Read 权限 Token 并保存为 `HF_TOKEN`。首次运行会下载模型。
-
-## 使用示例
+首次运行前，需要在 Hugging Face 接受 [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) 的使用条款，并创建 Read 权限 Token。
 
 ```bash
-uv run python -m mimo_transcriber meeting.m4a --num-speakers 3 --language zh
-uv run python -m mimo_transcriber meeting.m4a --language auto
-uv run python -m mimo_transcriber meeting.m4a --debug-json --verbose
-uv run python -m mimo_transcriber meeting.m4a --device mps --verbose
+uv run mimo-transcriber meeting.m4a --num-speakers 2
 ```
 
-## 准确率与隐私边界
-
-- 说话人编号只在当前录音内有效，不能跨录音识别真实人物。
-- 重叠讲话、极短插话、背景噪声和低质量音频会降低准确率。
-- CPU 可以运行，长音频的 diarization 可能较慢。
-- 音频片段会发送给 MiMo API；完整原始文件不会直接上传。
-
-## Linux 安装
-
-Ubuntu/Debian:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y ffmpeg
-```
-
-安装 uv 后运行 `uv sync`。带 NVIDIA GPU 的 Linux 可以使用 `--device cuda`；否则使用默认的 `--device auto`。
-
-## 环境变量
-
-复制 `.env.example` 为 `.env`，或在 shell 中设置：
-
-```bash
-export MIMO_API_KEY="..."
-export HF_TOKEN="..."
-```
-
-已有环境变量优先于 `.env`。不要把 `.env` 或真实 Token 提交到 Git。
+默认在录音旁生成同名 `.txt` 文件。相同任务中断后，再次执行相同命令会自动复用 `/tmp/cscribe/` 中的有效缓存。
 
 ## CLI 参数
 
+```text
+uv run mimo-transcriber INPUT [参数]
+```
+
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `input` | 必填 | 本地 M4A 输入文件 |
-| `-o, --output` | 输入同名 TXT | 输出路径 |
-| `--num-speakers` | 自动估计 | 已知准确说话人数 |
-| `--min-speakers` | `1` | 自动估计下限 |
-| `--max-speakers` | `6` | 自动估计上限 |
-| `--language` | `auto` | `auto`、`zh` 或 `en` |
-| `--device` | `auto` | `auto`、`cpu`、`cuda` 或实验性 `mps` |
-| `--concurrency` | `4` | MiMo 最大并发 |
-| `--requests-per-minute` | `80` | 全局每分钟请求上限 |
-| `--max-retries` | `3` | 首次失败后的最大重试次数 |
-| `--keyword-count` | `20` | 关键词数量 |
+| `INPUT` | 必填 | 本地 M4A 文件 |
+| `-o, --output PATH` | 输入文件同名 TXT | 输出路径 |
+| `--num-speakers N` | 自动估计 | 准确的说话人数 |
+| `--min-speakers N` | `1` | 自动估计人数下限 |
+| `--max-speakers N` | `6` | 自动估计人数上限 |
+| `--language {auto,zh,en}` | `auto` | 转写语言 |
+| `--device {auto,cpu,cuda,mps}` | `auto` | 说话人分离设备；MPS 为实验性支持 |
+| `--concurrency N` | `2` | MiMo 最大并发请求数 |
+| `--requests-per-minute N` | `20` | 全局每分钟请求上限 |
+| `--max-retries N` | `3` | 每个片段首次失败后的最大重试次数 |
+| `--keyword-count N` | `20` | 输出的关键词数量 |
 | `--debug-json` | 关闭 | 额外生成 `.segments.json` |
-| `--fail-fast` | 关闭 | 首段最终失败即停止且不写正式 TXT |
-| `-v, --verbose` | 关闭 | 输出调试日志和阶段耗时 |
+| `--fail-fast` | 关闭 | 任一片段最终失败时立即停止，不生成正式 TXT |
+| `--debug` | 关闭 | 输出应用调试日志 |
+| `-v, --verbose` | 关闭 | 显示更详细的进度和阶段耗时 |
 
-## 终端进度显示
+退出码：`0` 表示全部成功；`1` 表示启动或关键阶段失败；`2` 表示 TXT 已生成，但部分片段转写失败。
 
-交互终端（TTY）中显示单行动态进度，包含当前阶段、已用时间、切片和转写完成数量，以及最近发生的重试事件。非交互终端或输出重定向场景自动退化为普通日志。
+## 怎么换 ASR 模型
 
-```text
-⠹ 正在进行说话人分离｜已用时 01:42
-⠸ 正在处理音频片段｜切片 18/37｜转写 12/37
-⠼ 正在处理音频片段｜切片 20/37｜转写 12/37｜s0016 重试 2/3
-✓ 已完成｜36 成功｜1 失败｜耗时 03:26
-```
+当前 ASR 模型为 `mimo-v2.5-asr`，尚未提供 CLI 或环境变量配置。更换模型时需要同步修改：
 
-进度输出使用标准错误流，不影响标准输出的机器可读内容。进度组件渲染故障不会中断转写或改变退出码。
+1. `src/mimo_transcriber/mimo_asr.py` 中请求 MiMo API 的 `model`
+2. `src/mimo_transcriber/cache.py` 中的 `MIMO_MODEL_ID`
 
-## 并发流水线
-
-说话人分离完成后，最多两个 FFmpeg 切片 worker 与 `--concurrency` 个 MiMo 转录 worker 以有界流水线并发执行。切片完成后立即进入转录队列，不等待全部切片结束。转录队列容量固定为 `max(2, 2 × --concurrency)`，形成背压避免长录音一次性堆积大量待发送数据。
-
-## 自动恢复
-
-相同任务中断后重新执行相同命令会自动续跑，复用所有已验证的前序产物和成功转录文本：
-
-- 标准化音频和说话人分离结果有效时跳过重新生成。
-- 已成功转录的片段永不重复请求 MiMo。
-- 失败和未处理的片段在新进程中重新获得完整请求次数（首次请求 + 最多 3 次重试）。
-
-缓存位于 `/tmp/cscribe/<task-hash>/`，恢复是尽力而为：操作系统可能随时清理 `/tmp`。缓存缺失时程序安全地从头运行，不视为异常。
-
-## 缓存清理与部分失败
-
-- 全部片段成功：主动删除 `/tmp/cscribe/<task-hash>/` 工作目录，目标目录只保留正式 TXT 和显式指定的 `.segments.json`。
-- 部分失败：保留工作目录，原子生成包含 `[该片段识别失败]` 的 TXT，退出码为 `2`。下次相同命令只重试失败片段。
-- 同一任务的第二个进程被拒绝，避免重复发送 API 请求。
-
-## 输出与退出码
-
-TXT 第一行是录音时间和时长，随后是关键词与按时间排序的说话人片段。退出码 `0` 表示全部成功，`1` 表示启动或关键阶段失败，`2` 表示 TXT 已生成但存在失败片段。
-
-## 实验性 Apple MPS
-
-`--device mps` 会先检查当前 PyTorch 的 MPS 构建与运行时状态，再使用标准化录音的前 10 秒运行真实 pyannote Community-1 预检。预检成功后会复用同一个 MPS pipeline 处理完整录音。
-
-MPS 不可用、预检失败或完整运行失败时，程序会自动回退 CPU。完整运行回退不会重复 FFmpeg 标准化，也不会重复已经完成的 MiMo 请求。默认的 `--device auto` 暂时不会选择 MPS。
-
-应用只提供诊断，不会自动更换 PyTorch 或修改 macOS。兼容性取决于 Apple 芯片、macOS、Python、PyTorch 与 pyannote 的具体版本组合。
-
-评估一台机器是否值得使用 MPS 时，使用同一段 1～3 分钟、至少两位说话人的录音分别运行 CPU 和 MPS 各三次。比较 diarization 中位耗时；只有 MPS 稳定完成且至少快 20% 时才建议日常使用。
-
-```bash
-# 从录音中截取 3 分钟基准样本（调整 -ss 到有对话的时间点）
-ffmpeg -y -ss 300 -t 180 -i meeting.m4a -c:a aac /tmp/benchmark.m4a
-
-# CPU 基准（运行三次，记录中位 diarization 耗时）
-uv run python -m mimo_transcriber /tmp/benchmark.m4a --num-speakers 2 --device cpu --verbose
-
-# MPS 基准（运行三次，比较中位耗时是否 ≥20% 降低）
-uv run python -m mimo_transcriber /tmp/benchmark.m4a --num-speakers 2 --device mps --verbose
-```
+两处必须保持一致。缓存身份包含模型 ID，修改后旧模型的续跑缓存不会被错误复用。新模型还需要兼容当前 MiMo OpenAI 风格接口、`input_audio` 消息格式和 `asr_options.language` 参数。
 
 ## 常见问题
 
-- `ffmpeg/ffprobe not found`：macOS 运行 `brew install ffmpeg`；Ubuntu/Debian 安装 `ffmpeg` 包。
-- Hugging Face 401/403：确认已接受 Community-1 模型条款，并使用 Read 权限 `HF_TOKEN`。
-- CUDA 不可用：改用 `--device cpu`，或检查 NVIDIA 驱动和 PyTorch CUDA 环境。
-- MiMo 429/5xx/超时：程序会按指数退避重试；可降低 `--concurrency` 或 `--requests-per-minute`。
-- 某些片段显示 `[该片段识别失败]`：查看 verbose 日志；默认仍会生成结果并返回退出码 2。
-- MPS 回退 CPU：使用 `--verbose` 查看 `MPS 构建支持` 和 `MPS 运行时可用`；确认当前 Python 为 arm64，并检查 macOS、PyTorch 与 pyannote 版本兼容性。
+- **提示找不到 `ffmpeg` 或 `ffprobe`**：macOS 执行 `brew install ffmpeg`；Ubuntu / Debian 安装 `ffmpeg` 包。
+
+- **Hugging Face 返回 401 / 403**：确认已经接受 pyannote Community-1 的模型条款，并使用具有 Read 权限的 `HF_TOKEN`。
+
+- **MiMo 返回 429、5xx 或请求超时**：程序会自动退避重试。仍频繁失败时，降低 `--concurrency` 或 `--requests-per-minute`。
+
+- **结果中出现 `[该片段识别失败]`**：使用 `--debug` 查看日志。程序默认保留缓存并返回退出码 `2`，再次执行相同命令只重试失败片段。
+
+- **CUDA 不可用或 MPS 自动回退 CPU**：先改用 `--device cpu`。MPS 兼容性取决于 macOS、Python、PyTorch 和 pyannote 的版本组合，可配合 `--debug` 查看原因。
+
+- **第二个相同任务无法启动**：同一任务有进程锁，防止重复发送 API 请求。等待前一个任务结束后再运行。
+
+## 开源协议
+
+[MIT License](LICENSE)
