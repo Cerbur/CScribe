@@ -1,5 +1,7 @@
+import asyncio
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -209,3 +211,81 @@ async def test_fatal_cpu_fallback_failure_stops_before_slicing(
         )
 
     assert sliced == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_ready_normalization_and_diarization(tmp_path: Path) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 2, "aac", 48000, 2, datetime(2026, 1, 1, 9))
+
+    norm_calls = 0
+    diar_calls = 0
+
+    def _normalize(src: Path, target: Path) -> None:
+        nonlocal norm_calls
+        norm_calls += 1
+        target.write_bytes(b"wav")
+
+    def _diarize(*args, **kwargs):
+        nonlocal diar_calls
+        diar_calls += 1
+        return diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+            SpeakerSegment(-1, 1, 2, "B"),
+        ])
+
+    async def transcribe(items, fail_fast):
+        segment = items[0][0]
+        segment.text = "ok"
+        segment.status = SegmentStatus.SUCCESS
+        raise asyncio.CancelledError()
+
+    deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=_normalize,
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=_diarize,
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        transcribe=transcribe,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_pipeline(
+            AppConfig(input_path=source, output_path=output, num_speakers=2),
+            "mimo",
+            "hf",
+            deps,
+            cache_root=tmp_path,
+        )
+
+    assert norm_calls == 1
+    assert diar_calls == 1
+
+    async def _recover_transcribe(items, fail_fast):
+        for seg, _path in items:
+            seg.text = "完成"
+            seg.status = SegmentStatus.SUCCESS
+        return [item[0] for item in items]
+
+    recover_deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=_normalize,
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=_diarize,
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        transcribe=_recover_transcribe,
+    )
+
+    await run_pipeline(
+        AppConfig(input_path=source, output_path=output, num_speakers=2),
+        "mimo",
+        "hf",
+        recover_deps,
+        cache_root=tmp_path,
+    )
+
+    assert norm_calls == 1
+    assert diar_calls == 1
+    assert output.exists()
