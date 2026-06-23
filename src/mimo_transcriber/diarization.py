@@ -45,7 +45,7 @@ def create_pipeline(token: str, device: SelectedDevice) -> Any:
     return pipeline
 
 
-def apply_diarization_pipeline(
+def diarize_audio(
     path: Path,
     pipeline: Any,
     num_speakers: int | None,
@@ -64,24 +64,6 @@ def apply_diarization_pipeline(
         ]
     except Exception as exc:
         raise DiarizationError(f"说话人分离失败: {exc}") from exc
-
-
-def diarize_audio(
-    path: Path,
-    token: str,
-    device: SelectedDevice,
-    num_speakers: int | None,
-    min_speakers: int,
-    max_speakers: int,
-) -> list[SpeakerSegment]:
-    pipeline = create_pipeline(token, device)
-    return apply_diarization_pipeline(
-        path,
-        pipeline,
-        num_speakers,
-        min_speakers,
-        max_speakers,
-    )
 
 
 @dataclass(frozen=True)
@@ -207,7 +189,7 @@ def select_diarization_pipeline(
     pipeline: Any | None = None
     try:
         pipeline = pipeline_factory(token, "mps")
-        segments = apply_diarization_pipeline(
+        segments = diarize_audio(
             preflight_path,
             pipeline,
             num_speakers,
@@ -283,7 +265,7 @@ def run_diarization(
         selection.decision.selected_device.upper(),
     )
     try:
-        segments = apply_diarization_pipeline(
+        segments = diarize_audio(
             normalized_path,
             selection.pipeline,
             num_speakers,
@@ -305,7 +287,7 @@ def run_diarization(
         logger.warning("完整 MPS 说话人分离失败，已安全回退 CPU")
         cpu_pipeline = _build_pipeline_safely(token, "cpu", pipeline_factory)
         try:
-            segments = apply_diarization_pipeline(
+            segments = diarize_audio(
                 normalized_path,
                 cpu_pipeline,
                 num_speakers,

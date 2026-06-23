@@ -6,8 +6,8 @@ import pytest
 from mimo_transcriber.devices import DeviceCapabilities
 from mimo_transcriber.diarization import (
     DiarizationError,
-    apply_diarization_pipeline,
     classify_mps_failure,
+    diarize_audio,
     run_diarization,
     select_diarization_pipeline,
 )
@@ -30,7 +30,7 @@ class Pipeline:
 
 def test_adapter_uses_supplied_pipeline_and_exact_speaker_count() -> None:
     pipeline = Pipeline()
-    result = apply_diarization_pipeline(
+    result = diarize_audio(
         Path("normalized.wav"),
         pipeline,
         num_speakers=2,
@@ -45,7 +45,7 @@ def test_adapter_uses_supplied_pipeline_and_exact_speaker_count() -> None:
 
 def test_adapter_uses_minimum_and_maximum_when_count_is_unknown() -> None:
     pipeline = Pipeline()
-    apply_diarization_pipeline(
+    diarize_audio(
         Path("normalized.wav"),
         pipeline,
         num_speakers=None,
@@ -62,7 +62,7 @@ def test_adapter_wraps_pipeline_failure() -> None:
         raise RuntimeError("backend failed")
 
     with pytest.raises(DiarizationError, match="说话人分离失败"):
-        apply_diarization_pipeline(Path("normalized.wav"), fail, 2, 1, 6)
+        diarize_audio(Path("normalized.wav"), fail, 2, 1, 6)
 
 
 def capabilities(*, built: bool, available: bool) -> DeviceCapabilities:

@@ -8,14 +8,15 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from mimo_transcriber.audio import (
+    create_preflight_sample,
     normalize_audio,
     payload_fits,
     probe_audio,
     slice_mp3,
     workspace,
 )
-from mimo_transcriber.config import AppConfig, resolve_device
-from mimo_transcriber.diarization import diarize_audio
+from mimo_transcriber.config import AppConfig
+from mimo_transcriber.diarization import DiarizationResult, run_diarization
 from mimo_transcriber.formatter import write_outputs
 from mimo_transcriber.keywords import extract_keywords
 from mimo_transcriber.mimo_asr import MiMoTranscriber, openai_request
@@ -29,7 +30,8 @@ logger = logging.getLogger(__name__)
 class PipelineDependencies:
     probe: Callable[[Path], Any] = probe_audio
     normalize: Callable[[Path, Path], None] = normalize_audio
-    diarize: Callable[..., list[SpeakerSegment]] = diarize_audio
+    create_preflight: Callable[[Path, Path], None] = create_preflight_sample
+    diarize: Callable[..., DiarizationResult] = run_diarization
     slice_audio: Callable[[Path, SpeakerSegment, Path], None] = slice_mp3
     payload_fits: Callable[[Path, SpeakerSegment], bool] = payload_fits
     transcribe: Callable[
@@ -79,14 +81,18 @@ async def run_pipeline(
     with workspace(config.keep_temp) as temp:
         normalized = temp / "normalized.wav"
         dependencies.normalize(config.input_path, normalized)
-        raw = dependencies.diarize(
+        preflight = temp / "preflight.wav"
+        dependencies.create_preflight(normalized, preflight)
+        diarization = dependencies.diarize(
             normalized,
+            preflight,
             hf_token,
-            resolve_device(config.device),
+            config.device,
             config.num_speakers,
             config.min_speakers,
             config.max_speakers,
         )
+        raw = diarization.segments
         segments = process_segments(raw, metadata.duration_seconds)
         items = prepare_audio_segments(
             normalized,
