@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mimo_transcriber.config import AppConfig, ConfigError, resolve_device
+from mimo_transcriber.config import AppConfig, ConfigError, resolve_device, validate_runtime
 
 
 def test_num_speakers_must_be_positive(tmp_path: Path) -> None:
@@ -36,3 +36,33 @@ def test_auto_device_on_linux_uses_available_cuda(
 def test_explicit_mps_is_reserved_for_diarization_selector() -> None:
     with pytest.raises(ConfigError, match="MPS"):
         resolve_device("mps", cuda_available=lambda: False)
+
+
+def test_default_mlx_runtime_does_not_require_mimo_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    monkeypatch.setenv("HF_TOKEN", "hf-token")
+    monkeypatch.delenv("MIMO_API_KEY", raising=False)
+    monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
+
+    runtime = validate_runtime(AppConfig(input_path=source))
+
+    assert runtime.hf_token == "hf-token"
+    assert runtime.mimo_api_key is None
+
+
+def test_mimo_runtime_requires_mimo_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    monkeypatch.setenv("HF_TOKEN", "hf-token")
+    monkeypatch.delenv("MIMO_API_KEY", raising=False)
+    monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
+
+    with pytest.raises(ConfigError, match="缺少 MIMO_API_KEY"):
+        validate_runtime(AppConfig(input_path=source, asr="mimo"))

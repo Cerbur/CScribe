@@ -38,3 +38,41 @@ def test_second_live_lock_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(TaskAlreadyRunningError):
         second.acquire()
     first.release()
+
+
+def test_task_hash_changes_when_asr_identity_changes(tmp_path: Path) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    fingerprint = fingerprint_input(source)
+
+    mlx = TaskPaths.for_run(
+        AppConfig(input_path=source, asr="mlx"),
+        fingerprint,
+        tmp_path,
+    )
+    mimo = TaskPaths.for_run(
+        AppConfig(input_path=source, asr="mimo", stt_model="mimo-v2.5-asr"),
+        fingerprint,
+        tmp_path,
+    )
+
+    assert mlx.task_hash != mimo.task_hash
+
+
+def test_task_hash_ignores_asr_runtime_controls(tmp_path: Path) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    fingerprint = fingerprint_input(source)
+
+    first = TaskPaths.for_run(
+        AppConfig(input_path=source, concurrency=1, max_retries=0),
+        fingerprint,
+        tmp_path,
+    )
+    second = TaskPaths.for_run(
+        AppConfig(input_path=source, concurrency=8, max_retries=5),
+        fingerprint,
+        tmp_path,
+    )
+
+    assert first.task_hash == second.task_hash

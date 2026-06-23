@@ -5,7 +5,12 @@ import platform
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mimo_transcriber.asr.base import AsrProvider, RuntimeConfig
+else:
+    AsrProvider = Literal["mlx", "mimo"]
 
 from dotenv import load_dotenv
 
@@ -30,6 +35,8 @@ class AppConfig:
     requests_per_minute: int = 20
     max_retries: int = 3
     keyword_count: int = 20
+    asr: AsrProvider = "mlx"
+    stt_model: str | None = None
     debug_json: bool = False
     fail_fast: bool = False
     debug: bool = False
@@ -39,6 +46,15 @@ class AppConfig:
     def resolved_output_path(self) -> Path:
         return self.output_path or self.input_path.with_suffix(".txt")
 
+    def asr_cache_identity(self) -> dict[str, object]:
+        from mimo_transcriber.asr.base import AsrConfig
+
+        return AsrConfig(
+            provider=self.asr,
+            stt_model=self.stt_model,
+            language=self.language,
+        ).cache_identity()
+
     def cache_parameters(self) -> dict[str, object]:
         return {
             "num_speakers": self.num_speakers,
@@ -47,6 +63,7 @@ class AppConfig:
             "language": self.language,
             "device": self.device,
             "keyword_count": self.keyword_count,
+            "asr": self.asr_cache_identity(),
         }
 
     def validate_arguments(self) -> None:
@@ -60,6 +77,8 @@ class AppConfig:
             raise ConfigError("--requests-per-minute 必须大于 0")
         if self.max_retries < 0 or self.keyword_count < 0:
             raise ConfigError("--max-retries 和 --keyword-count 不能为负数")
+        if self.asr not in ("mlx", "mimo"):
+            raise ConfigError("--asr 必须是 mlx 或 mimo")
 
 
 def resolve_device(
@@ -80,7 +99,9 @@ def resolve_device(
     return "cpu"
 
 
-def validate_runtime(config: AppConfig) -> tuple[str, str]:
+def validate_runtime(config: AppConfig) -> RuntimeConfig:
+    from mimo_transcriber.asr.base import RuntimeConfig
+
     load_dotenv(override=False)
     config.validate_arguments()
     if not config.input_path.is_file() or not os.access(config.input_path, os.R_OK):
@@ -90,9 +111,12 @@ def validate_runtime(config: AppConfig) -> tuple[str, str]:
             raise ConfigError(f"未找到 {command}；macOS 可运行: brew install ffmpeg")
     mimo_key = os.getenv("MIMO_API_KEY", "")
     hf_token = os.getenv("HF_TOKEN", "")
-    if not mimo_key:
-        raise ConfigError("缺少 MIMO_API_KEY，请写入环境变量或 .env")
     if not hf_token:
         raise ConfigError("缺少 HF_TOKEN，请写入环境变量或 .env")
+    if config.asr == "mimo" and not mimo_key:
+        raise ConfigError("缺少 MIMO_API_KEY，请写入环境变量或 .env")
     config.resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    return mimo_key, hf_token
+    return RuntimeConfig(
+        hf_token=hf_token,
+        mimo_api_key=mimo_key or None,
+    )

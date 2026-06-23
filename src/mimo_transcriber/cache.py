@@ -18,7 +18,6 @@ PROCESSING_RULES_VERSION = 1
 AUDIO_CHANNELS = 1
 AUDIO_SAMPLE_RATE = 16_000
 AUDIO_CODEC = "pcm_s16le"
-MIMO_MODEL_ID = "mimo-v2.5-asr"
 DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
 SUBSONIC_AUDIO_CODEC = "aac"
 
@@ -85,7 +84,6 @@ class TaskPaths:
             "output_path": str(config.resolved_output_path.resolve()),
             "params": params,
             "diarization_model": DIARIZATION_MODEL_ID,
-            "mimo_model": MIMO_MODEL_ID,
             "audio_constants": {
                 "channels": AUDIO_CHANNELS,
                 "sample_rate": AUDIO_SAMPLE_RATE,
