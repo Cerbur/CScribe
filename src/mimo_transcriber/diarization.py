@@ -111,6 +111,24 @@ def clear_mps_cache() -> None:
         logger.debug("清理 MPS 缓存失败: %s", type(exc).__name__)
 
 
+def _yes_no(value: bool | None) -> str:
+    if value is None:
+        return "未知"
+    return "是" if value else "否"
+
+
+def log_device_decision(decision: DeviceDecision) -> None:
+    if decision.requested_device != "mps":
+        return
+    logger.info("请求设备: MPS")
+    logger.info("MPS 构建支持: %s", _yes_no(decision.mps_built))
+    logger.info("MPS 运行时可用: %s", _yes_no(decision.mps_available))
+    if decision.selected_device == "cpu":
+        logger.warning("MPS 未启用: %s", decision.fallback_reason)
+        logger.warning("已回退 CPU")
+        logger.info("建议检查 PyTorch、macOS 版本以及当前 Python 架构")
+
+
 def _cpu_selection(
     requested_device: Device,
     token: str,
@@ -260,6 +278,7 @@ def run_diarization(
         cache_clearer=cache_clearer,
         clock=clock,
     )
+    log_device_decision(selection.decision)
     logger.info(
         "正在使用 %s 处理完整音频",
         selection.decision.selected_device.upper(),
@@ -299,15 +318,14 @@ def run_diarization(
                 "MPS 完整运行失败，CPU 回退也失败"
             ) from cpu_exc
 
-        return DiarizationResult(
-            segments,
-            DeviceDecision(
-                requested_device="mps",
-                selected_device="cpu",
-                mps_built=mps_decision.mps_built,
-                mps_available=mps_decision.mps_available,
-                preflight_elapsed_seconds=mps_decision.preflight_elapsed_seconds,
-                fallback_category="full_run_failed",
-                fallback_reason=fallback_reason("full_run_failed"),
-            ),
+        final_decision = DeviceDecision(
+            requested_device="mps",
+            selected_device="cpu",
+            mps_built=mps_decision.mps_built,
+            mps_available=mps_decision.mps_available,
+            preflight_elapsed_seconds=mps_decision.preflight_elapsed_seconds,
+            fallback_category="full_run_failed",
+            fallback_reason=fallback_reason("full_run_failed"),
         )
+        log_device_decision(final_decision)
+        return DiarizationResult(segments, final_decision)

@@ -1,13 +1,15 @@
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from mimo_transcriber.devices import DeviceCapabilities
+from mimo_transcriber.devices import DeviceCapabilities, DeviceDecision
 from mimo_transcriber.diarization import (
     DiarizationError,
     classify_mps_failure,
     diarize_audio,
+    log_device_decision,
     run_diarization,
     select_diarization_pipeline,
 )
@@ -341,3 +343,26 @@ def test_cpu_failure_after_mps_failure_is_fatal() -> None:
             capabilities=capabilities(built=True, available=True),
             pipeline_factory=factory,
         )
+
+
+def test_runtime_fallback_log_is_actionable_and_secret_free(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    decision = DeviceDecision(
+        requested_device="mps",
+        selected_device="cpu",
+        mps_built=True,
+        mps_available=False,
+        fallback_category="runtime_unavailable",
+        fallback_reason="当前 PyTorch 运行时无法使用 MPS",
+    )
+
+    with caplog.at_level(logging.INFO):
+        log_device_decision(decision)
+
+    rendered = caplog.text
+    assert "请求设备: MPS" in rendered
+    assert "MPS 构建支持: 是" in rendered
+    assert "MPS 运行时可用: 否" in rendered
+    assert "已回退 CPU" in rendered
+    assert "检查 PyTorch、macOS 版本以及当前 Python 架构" in rendered
