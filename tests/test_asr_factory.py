@@ -24,3 +24,16 @@ def test_factory_requires_mimo_key_for_mimo_engine() -> None:
             RuntimeConfig(hf_token="hf", mimo_api_key=None),
             event_sink=None,
         )
+
+
+def test_factory_creates_mlx_engine() -> None:
+    from mimo_transcriber.asr.mlx import MlxAsrEngine
+
+    engine = create_asr_engine(
+        AsrConfig(provider="mlx"),
+        RuntimeConfig(hf_token="hf"),
+        event_sink=None,
+    )
+
+    assert isinstance(engine, MlxAsrEngine)
+    assert engine.cache_identity["engine"] == "mlx-whisper"
