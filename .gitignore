@@ -6,3 +6,7 @@ __pycache__/
 *.wav
 *.mp3
 *.segments.json
+*.txt
+.DS_Store
+dist/
+*.egg-info/
