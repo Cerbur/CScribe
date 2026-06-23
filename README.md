@@ -1,4 +1,4 @@
-# MiMo 多说话人录音转写 CLI
+# CScribe
 
 一个本地运行的 Python CLI：使用 FFmpeg 标准化 M4A，使用 pyannote 按音色区分说话人，将切割后的短 MP3 片段发送给 MiMo-V2.5-ASR，最后生成带说话人、时间戳和关键词的 UTF-8 TXT。
 
