@@ -244,3 +244,88 @@ def select_diarization_pipeline(
             preflight_elapsed_seconds=elapsed,
         ),
     )
+
+
+@dataclass(frozen=True)
+class DiarizationResult:
+    segments: list[SpeakerSegment]
+    decision: DeviceDecision
+
+
+def run_diarization(
+    normalized_path: Path,
+    preflight_path: Path,
+    token: str,
+    requested_device: Device,
+    num_speakers: int | None,
+    min_speakers: int,
+    max_speakers: int,
+    *,
+    capabilities: DeviceCapabilities | None = None,
+    pipeline_factory: Callable[[str, SelectedDevice], Any] = create_pipeline,
+    cache_clearer: Callable[[], None] = clear_mps_cache,
+    clock: Callable[[], float] = time.monotonic,
+) -> DiarizationResult:
+    selection = select_diarization_pipeline(
+        preflight_path,
+        token,
+        requested_device,
+        num_speakers,
+        min_speakers,
+        max_speakers,
+        capabilities=capabilities,
+        pipeline_factory=pipeline_factory,
+        cache_clearer=cache_clearer,
+        clock=clock,
+    )
+    logger.info(
+        "正在使用 %s 处理完整音频",
+        selection.decision.selected_device.upper(),
+    )
+    try:
+        segments = apply_diarization_pipeline(
+            normalized_path,
+            selection.pipeline,
+            num_speakers,
+            min_speakers,
+            max_speakers,
+        )
+        return DiarizationResult(segments, selection.decision)
+    except DiarizationError:
+        if selection.decision.selected_device != "mps":
+            raise
+
+        mps_decision = selection.decision
+        del selection
+        try:
+            cache_clearer()
+        except Exception as cleanup_exc:
+            logger.debug("清理 MPS 缓存失败: %s", type(cleanup_exc).__name__)
+
+        logger.warning("完整 MPS 说话人分离失败，已安全回退 CPU")
+        cpu_pipeline = _build_pipeline_safely(token, "cpu", pipeline_factory)
+        try:
+            segments = apply_diarization_pipeline(
+                normalized_path,
+                cpu_pipeline,
+                num_speakers,
+                min_speakers,
+                max_speakers,
+            )
+        except DiarizationError as cpu_exc:
+            raise DiarizationError(
+                "MPS 完整运行失败，CPU 回退也失败"
+            ) from cpu_exc
+
+        return DiarizationResult(
+            segments,
+            DeviceDecision(
+                requested_device="mps",
+                selected_device="cpu",
+                mps_built=mps_decision.mps_built,
+                mps_available=mps_decision.mps_available,
+                preflight_elapsed_seconds=mps_decision.preflight_elapsed_seconds,
+                fallback_category="full_run_failed",
+                fallback_reason=fallback_reason("full_run_failed"),
+            ),
+        )

@@ -8,6 +8,7 @@ from mimo_transcriber.diarization import (
     DiarizationError,
     apply_diarization_pipeline,
     classify_mps_failure,
+    run_diarization,
     select_diarization_pipeline,
 )
 
@@ -250,3 +251,93 @@ def test_cpu_pipeline_load_error_does_not_expose_token() -> None:
 
     assert token not in str(captured.value)
     assert captured.value.__cause__ is None
+
+
+def test_full_run_reuses_successfully_preflighted_mps_pipeline() -> None:
+    mps = Pipeline()
+
+    result = run_diarization(
+        Path("normalized.wav"),
+        Path("preflight.wav"),
+        "secret",
+        "mps",
+        2,
+        1,
+        6,
+        capabilities=capabilities(built=True, available=True),
+        pipeline_factory=lambda token, device: mps,
+    )
+
+    assert mps.calls == [
+        ("preflight.wav", {"num_speakers": 2}),
+        ("normalized.wav", {"num_speakers": 2}),
+    ]
+    assert result.decision.selected_device == "mps"
+    assert len(result.segments) == 1
+
+
+def test_complete_mps_failure_retries_complete_diarization_once_on_cpu() -> None:
+    calls: list[tuple[str, str]] = []
+
+    class MpsPipeline(Pipeline):
+        def __call__(self, path: str, **kwargs):
+            calls.append(("mps", path))
+            if path == "normalized.wav":
+                raise RuntimeError("MPS backend out of memory")
+            return SimpleNamespace(speaker_diarization=Annotation())
+
+    class CpuPipeline(Pipeline):
+        def __call__(self, path: str, **kwargs):
+            calls.append(("cpu", path))
+            return SimpleNamespace(speaker_diarization=Annotation())
+
+    def factory(token: str, device: str):
+        return MpsPipeline() if device == "mps" else CpuPipeline()
+
+    result = run_diarization(
+        Path("normalized.wav"),
+        Path("preflight.wav"),
+        "secret",
+        "mps",
+        2,
+        1,
+        6,
+        capabilities=capabilities(built=True, available=True),
+        pipeline_factory=factory,
+    )
+
+    assert calls == [
+        ("mps", "preflight.wav"),
+        ("mps", "normalized.wav"),
+        ("cpu", "normalized.wav"),
+    ]
+    assert result.decision.selected_device == "cpu"
+    assert result.decision.fallback_category == "full_run_failed"
+
+
+def test_cpu_failure_after_mps_failure_is_fatal() -> None:
+    class MpsPipeline(Pipeline):
+        def __call__(self, path: str, **kwargs):
+            if path == "normalized.wav":
+                raise RuntimeError("MPS backend out of memory")
+            return SimpleNamespace(speaker_diarization=Annotation())
+
+    def factory(token: str, device: str):
+        if device == "mps":
+            return MpsPipeline()
+        def fail(path: str, **kwargs):
+            raise RuntimeError("cpu failed")
+        return fail
+
+    with pytest.raises(DiarizationError, match="CPU 回退也失败"):
+        run_diarization(
+            Path("normalized.wav"),
+            Path("preflight.wav"),
+            "secret",
+            "mps",
+            2,
+            1,
+            6,
+            capabilities=capabilities(built=True, available=True),
+            pipeline_factory=factory,
+        )
