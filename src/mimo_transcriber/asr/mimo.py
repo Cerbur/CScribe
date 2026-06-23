@@ -201,7 +201,7 @@ class MimoAsrEngine:
         return sorted(results, key=lambda item: item.sort_key())
 
 
-def openai_request(api_key: str, timeout: float = 120.0) -> Request:
+def openai_request(api_key: str, model: str = "mimo-v2.5-asr", timeout: float = 120.0) -> Request:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(
@@ -213,7 +213,7 @@ def openai_request(api_key: str, timeout: float = 120.0) -> Request:
 
     async def request(data_url: str, language: str) -> Any:
         return await client.chat.completions.create(
-            model="mimo-v2.5-asr",
+            model=model,
             messages=[{
                 "role": "user",
                 "content": [{

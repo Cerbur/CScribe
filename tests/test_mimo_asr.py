@@ -139,3 +139,26 @@ async def test_empty_response_is_not_retried(tmp_path: Path) -> None:
     result = await transcriber.transcribe_one(segment, audio_path)
     assert request_mock.await_count == 1
     assert result.status is SegmentStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_openai_request_uses_configured_model(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Completions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    class Chat:
+        completions = Completions()
+
+    class Client:
+        chat = Chat()
+
+    monkeypatch.setattr("openai.AsyncOpenAI", lambda **kwargs: Client())
+
+    request = openai_request("key", model="custom-model")
+    await request("data:audio/mp3;base64,abc", "en")
+
+    assert captured["model"] == "custom-model"

@@ -1,8 +1,8 @@
 # CScribe
 
-本地运行的多人录音转写 CLI。CScribe 使用 pyannote 区分说话人，将切分后的音频片段发送给 MiMo ASR，并生成带时间戳、说话人和关键词的 TXT。
+本地运行的多人录音转写 CLI。CScribe 使用 pyannote 区分说话人，默认通过本地 MLX Whisper 转写切分后的音频片段，并生成带时间戳、说话人和关键词的 TXT。
 
-完整原始录音不会直接上传，只有说话人分离后的短音频片段会发送给 MiMo API。
+默认模式不会上传音频片段。需要使用 MiMo ASR 时，可以通过 `--asr mimo` 显式选择远端后端。
 
 ## 功能
 
@@ -28,11 +28,16 @@ uv sync
 cp .env.example .env
 ```
 
-在 `.env` 中填写：
+默认本地转写只需要：
+
+```dotenv
+HF_TOKEN=你的_Hugging_Face_Token
+```
+
+使用 MiMo 时额外填写：
 
 ```dotenv
 MIMO_API_KEY=你的_MiMo_API_Key
-HF_TOKEN=你的_Hugging_Face_Token
 ```
 
 首次运行前，需要在 Hugging Face 接受 [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) 的使用条款，并创建 Read 权限 Token。
@@ -58,8 +63,10 @@ uv run mimo-transcriber INPUT [参数]
 | `--max-speakers N` | `6` | 自动估计人数上限 |
 | `--language {auto,zh,en}` | `auto` | 转写语言 |
 | `--device {auto,cpu,cuda,mps}` | `auto` | 说话人分离设备；MPS 为实验性支持 |
-| `--concurrency N` | `2` | MiMo 最大并发请求数 |
-| `--requests-per-minute N` | `20` | 全局每分钟请求上限 |
+| `--asr {mlx,mimo}` | `mlx` | ASR 引擎；默认本地 MLX Whisper，`mimo` 为远端 MiMo |
+| `--stt-model MODEL` | 引擎默认值 | STT 模型；由所选 ASR 引擎解释 |
+| `--concurrency N` | `2` | ASR worker 数量；MiMo 可并发请求，MLX 首版内部串行推理 |
+| `--requests-per-minute N` | `20` | MiMo 每分钟请求上限；本地 MLX 忽略 |
 | `--max-retries N` | `3` | 每个片段首次失败后的最大重试次数 |
 | `--keyword-count N` | `20` | 输出的关键词数量 |
 | `--debug-json` | 关闭 | 额外生成 `.segments.json` |
@@ -69,14 +76,27 @@ uv run mimo-transcriber INPUT [参数]
 
 退出码：`0` 表示全部成功；`1` 表示启动或关键阶段失败；`2` 表示 TXT 已生成，但部分片段转写失败。
 
-## 怎么换 ASR 模型
+## 怎么选择 ASR 引擎和 STT 模型
 
-当前 ASR 模型为 `mimo-v2.5-asr`，尚未提供 CLI 或环境变量配置。更换模型时需要同步修改：
+默认使用本地 MLX Whisper：
 
-1. `src/mimo_transcriber/mimo_asr.py` 中请求 MiMo API 的 `model`
-2. `src/mimo_transcriber/cache.py` 中的 `MIMO_MODEL_ID`
+```bash
+uv run mimo-transcriber meeting.m4a
+```
 
-两处必须保持一致。缓存身份包含模型 ID，修改后旧模型的续跑缓存不会被错误复用。新模型还需要兼容当前 MiMo OpenAI 风格接口、`input_audio` 消息格式和 `asr_options.language` 参数。
+指定本地模型：
+
+```bash
+uv run mimo-transcriber meeting.m4a --asr mlx --stt-model mlx-community/whisper-small
+```
+
+使用 MiMo：
+
+```bash
+uv run mimo-transcriber meeting.m4a --asr mimo --stt-model mimo-v2.5-asr
+```
+
+`--stt-model` 对上层流水线透明，由所选 ASR 引擎解释。切换 ASR 引擎或模型会改变缓存身份，避免复用旧模型的转写结果。
 
 ## 常见问题
 

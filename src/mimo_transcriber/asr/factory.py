@@ -21,7 +21,7 @@ def create_asr_engine(
         if not runtime.mimo_api_key:
             raise ConfigError("缺少 MIMO_API_KEY，请写入环境变量或 .env")
         return MimoAsrEngine(
-            request=openai_request(runtime.mimo_api_key),
+            request=openai_request(runtime.mimo_api_key, model=config.resolved_model()),
             model=config.resolved_model(),
             language=config.language,
             concurrency=concurrency,
