@@ -19,6 +19,20 @@ def test_minimum_cannot_exceed_maximum(tmp_path: Path) -> None:
         AppConfig(input_path=source, min_speakers=4, max_speakers=2).validate_arguments()
 
 
-def test_auto_device_does_not_select_mps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auto_device_on_macos_stays_on_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("platform.system", lambda: "Darwin")
     assert resolve_device("auto", cuda_available=lambda: True) == "cpu"
+
+
+def test_auto_device_on_linux_uses_available_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    assert resolve_device("auto", cuda_available=lambda: True) == "cuda"
+
+
+def test_explicit_mps_is_reserved_for_diarization_selector() -> None:
+    with pytest.raises(ConfigError, match="MPS"):
+        resolve_device("mps", cuda_available=lambda: False)

@@ -22,7 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-speakers", type=int, default=1)
     parser.add_argument("--max-speakers", type=int, default=6)
     parser.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda", "mps"),
+        default="auto",
+    )
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--requests-per-minute", type=int, default=80)
     parser.add_argument("--max-retries", type=int, default=3)

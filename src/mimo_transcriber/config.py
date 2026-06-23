@@ -9,7 +9,7 @@ from typing import Callable, Literal
 
 from dotenv import load_dotenv
 
-Device = Literal["auto", "cpu", "cuda"]
+Device = Literal["auto", "cpu", "cuda", "mps"]
 Language = Literal["auto", "zh", "en"]
 
 
@@ -55,6 +55,8 @@ class AppConfig:
 def resolve_device(
     requested: Device, cuda_available: Callable[[], bool] | None = None
 ) -> Literal["cpu", "cuda"]:
+    if requested == "mps":
+        raise ConfigError("MPS 必须通过实验性 diarization 预检选择")
     if cuda_available is None:
         import torch
         cuda_available = torch.cuda.is_available
