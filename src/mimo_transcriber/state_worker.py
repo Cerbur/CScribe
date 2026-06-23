@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Protocol
 
 from mimo_transcriber.events import (
@@ -108,3 +109,17 @@ class RunStateProjector:
         segment.status = SegmentStatus.FAILED
         segment.error = error
         self.completed[segment.segment_id] = segment
+
+
+async def run_state_worker(
+    queue: asyncio.Queue[PipelineEvent | None],
+    projector: RunStateProjector,
+) -> None:
+    while True:
+        event = await queue.get()
+        try:
+            if event is None:
+                return
+            projector.handle(event)
+        finally:
+            queue.task_done()

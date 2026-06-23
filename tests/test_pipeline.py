@@ -548,3 +548,40 @@ async def test_end_to_end_resume_from_interruption_and_complete(
     assert second.exit_code == 0
     assert output.exists()
     assert not tp.work_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_records_success_through_manifest_projection(tmp_path: Path) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 1, "aac", 48_000, 2, None)
+
+    async def transcribe(items, fail_fast):
+        segment = items[0][0]
+        segment.text = "projected"
+        segment.status = SegmentStatus.SUCCESS
+        return [segment]
+
+    deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda source, target: target.write_bytes(b"wav"),
+        create_preflight=lambda source, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+        ]),
+        slice_audio=lambda source, segment, target: target.write_bytes(b"mp3"),
+        payload_fits=lambda path, segment: True,
+        transcribe=transcribe,
+    )
+
+    result = await run_pipeline(
+        AppConfig(input_path=source, output_path=output, num_speakers=1),
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
+        deps,
+        cache_root=tmp_path,
+    )
+
+    assert result.exit_code == 0
+    assert result.outcome.segments[0].text == "projected"
+    assert output.read_text(encoding="utf-8")

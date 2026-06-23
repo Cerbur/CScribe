@@ -13,6 +13,15 @@ from mimo_transcriber.cache import TaskAlreadyRunningError, TaskLock, TaskPaths,
 from mimo_transcriber.asr.base import AsrConfig, RuntimeConfig
 from mimo_transcriber.asr.factory import create_asr_engine
 from mimo_transcriber.config import AppConfig
+from mimo_transcriber.events import (
+    AudioSlice,
+    SegmentTotalChanged,
+    SliceFailed,
+    SliceReady,
+    TranscriptFailed,
+    TranscriptSucceeded,
+)
+from mimo_transcriber.state_worker import RunStateProjector, run_state_worker
 from mimo_transcriber.diarization import DiarizationResult, run_diarization
 from mimo_transcriber.formatter import write_outputs
 from mimo_transcriber.keywords import extract_keywords
@@ -301,8 +310,11 @@ async def _run_segment_workers(
     completed: dict[str, SpeakerSegment] = {}
     cancel_event = asyncio.Event()
 
+    state_queue: asyncio.Queue[object | None] = asyncio.Queue()
+    projector = RunStateProjector(manifest, store, reporter)
+    state_task = asyncio.create_task(run_state_worker(state_queue, projector))
+
     # Count recovered (already successful) segments
-    recovered_count = 0
     segments_by_id: dict[str, SpeakerSegment] = {s.segment_id: s for s in segments}
 
     # Ensure manifest records match current segments
@@ -315,13 +327,16 @@ async def _run_segment_workers(
         # Count already-successful transcripts
         if record.transcript_status == "success":
             completed[seg.segment_id] = seg
-            recovered_count += 1
+            await state_queue.put(
+                TranscriptSucceeded(seg.segment_id, seg.text or "")
+            )
     manifest.segments = work_items
     store.save(manifest)
 
-    for _ in range(recovered_count):
-        reporter.segment_completed(True)
-    logger.debug("恢复已完成片段: %d", recovered_count)
+    logger.debug(
+        "恢复已完成片段: %d",
+        sum(1 for _ in work_items if _.transcript_status == "success"),
+    )
 
     # Pre-create ASR engine for transcription workers
     if dependencies.transcribe is None:
@@ -360,8 +375,10 @@ async def _run_segment_workers(
 
     if pending == 0:
         logger.debug("所有片段已完成，无待处理工作")
+        await state_queue.put(None)
+        await state_task
         return sorted(
-            [s for s in segments],
+            projector.snapshot_completed_segments(),
             key=lambda s: s.sort_key(),
         )
 
@@ -386,8 +403,7 @@ async def _run_segment_workers(
                     _os.replace(candidate, target)
                     record.slice_status = "ready"
                     record.slice_bytes = size
-                    store.save(manifest)
-                    reporter.segment_sliced()
+                    await state_queue.put(SliceReady(seg.segment_id, target, size))
                     await transcribe_queue.put((record, target))
                 else:
                     candidate.unlink(missing_ok=True)
@@ -400,7 +416,7 @@ async def _run_segment_workers(
                     # Replace parent record in manifest with children atomically
                     idx = next(i for i, r in enumerate(manifest.segments) if r.segment.segment_id == record.segment.segment_id)
                     manifest.segments[idx:idx + 1] = child_records
-                    reporter.set_segment_total(len(manifest.segments))
+                    await state_queue.put(SegmentTotalChanged(len(manifest.segments)))
                     store.save(manifest)
                     for cr in child_records:
                         if cr.segment.segment_id not in segments_by_id:
@@ -410,14 +426,11 @@ async def _run_segment_workers(
                 logger.error("切片失败 %s: %s", record.segment.segment_id, exc)
                 record.slice_status = "failed"
                 record.error = str(exc)
-                record.segment.text = "[该片段识别失败]"
-                record.segment.status = SegmentStatus.FAILED
                 if record.segment.segment_id in segments_by_id:
                     segments_by_id[record.segment.segment_id] = record.segment
-                store.save(manifest)
-                reporter.segment_sliced()
-                reporter.segment_completed(False)
-                completed[record.segment.segment_id] = record.segment
+                await state_queue.put(
+                    SliceFailed(record.segment.segment_id, str(exc))
+                )
             finally:
                 slice_queue.task_done()
 
@@ -451,8 +464,23 @@ async def _run_segment_workers(
                             record.transcript_status
                         )
 
-                    completed[record.segment.segment_id] = record.segment
-                    store.save(manifest)
+                    if (
+                        record.transcript_status == "failed"
+                        or record.segment.status is SegmentStatus.FAILED
+                    ):
+                        await state_queue.put(
+                            TranscriptFailed(
+                                record.segment.segment_id,
+                                record.error or "transcription failed",
+                            )
+                        )
+                    else:
+                        await state_queue.put(
+                            TranscriptSucceeded(
+                                record.segment.segment_id,
+                                record.text or "",
+                            )
+                        )
                 except asyncio.CancelledError:
                     # Sync record from segment in case it was modified in-place before cancel
                     record.text = record.segment.text
@@ -462,8 +490,12 @@ async def _run_segment_workers(
                         segments_by_id[record.segment.segment_id].status = SegmentStatus(
                             record.transcript_status
                         )
-                    completed[record.segment.segment_id] = record.segment
-                    store.save(manifest)
+                    await state_queue.put(
+                        TranscriptSucceeded(
+                            record.segment.segment_id,
+                            record.segment.text or "",
+                        )
+                    )
                     raise
                 except Exception as exc:
                     if config.fail_fast:
@@ -477,8 +509,12 @@ async def _run_segment_workers(
                     record.error = f"{type(exc).__name__}: {exc}"
                     record.segment.text = "[该片段识别失败]"
                     record.segment.status = SegmentStatus.FAILED
-                    completed[record.segment.segment_id] = record.segment
-                    store.save(manifest)
+                    await state_queue.put(
+                        TranscriptFailed(
+                            record.segment.segment_id,
+                            f"{type(exc).__name__}: {exc}",
+                        )
+                    )
             finally:
                 transcribe_queue.task_done()
 
@@ -503,6 +539,11 @@ async def _run_segment_workers(
             transcribe_queue.put_nowait(None)
         await asyncio.gather(*transcribe_workers)
 
+        # Close state worker
+        await state_queue.join()
+        await state_queue.put(None)
+        await state_task
+
     except asyncio.CancelledError:
         cancel_event.set()
         # Drain queues and cancel workers
@@ -514,7 +555,11 @@ async def _run_segment_workers(
             transcribe_queue.task_done()
         for w in slice_workers + transcribe_workers:
             w.cancel()
-        await asyncio.gather(*slice_workers, *transcribe_workers, return_exceptions=True)
+        state_task.cancel()
+        await asyncio.gather(
+            *slice_workers, *transcribe_workers, state_task,
+            return_exceptions=True,
+        )
         store.save(manifest)
         raise
 
@@ -525,14 +570,9 @@ async def _run_segment_workers(
             if record.transcript_status == "failed":
                 raise RuntimeError(record.error or "片段识别失败")
 
-    # Return completed segments sorted by sort_key
-    result_segments = [
-        segments_by_id.get(sid, completed.get(sid, seg))
-        for sid, seg in [(s.segment_id, s) for s in segments]
-    ]
     return sorted(
-        [s for s in result_segments if s is not None],
-        key=lambda s: s.sort_key(),
+        projector.snapshot_completed_segments(),
+        key=lambda item: item.sort_key(),
     )
 
 
