@@ -60,15 +60,19 @@ class MiMoTranscriber:
         requests_per_minute: int,
         max_retries: int,
         sleep: Sleep = asyncio.sleep,
+        reporter: object = None,
     ) -> None:
+        from mimo_transcriber.progress import NullProgressReporter
+
         self.request = request
         self.language = language
         self.semaphore = asyncio.Semaphore(concurrency)
         self.limiter = RateLimiter(requests_per_minute)
         self.max_retries = max_retries
         self.sleep = sleep
+        self.reporter = reporter if reporter is not None else NullProgressReporter()
 
-    async def _one(self, segment: SpeakerSegment, path: Path) -> SpeakerSegment:
+    async def transcribe_one(self, segment: SpeakerSegment, path: Path) -> SpeakerSegment:
         data_url = encoded_audio_data(path)
         for attempt in range(self.max_retries + 1):
             try:
@@ -80,15 +84,24 @@ class MiMoTranscriber:
                     raise ValueError("MiMo 返回了空文本")
                 segment.text = text
                 segment.status = SegmentStatus.SUCCESS
+                self.reporter.segment_completed(True)
                 return segment
             except Exception as exc:
                 if attempt < self.max_retries and is_retryable(exc):
+                    retry_number = attempt + 1
+                    self.reporter.segment_retrying(
+                        segment.segment_id,
+                        retry_number,
+                        self.max_retries,
+                    )
                     await self.sleep((2**attempt) + random.uniform(0, 0.25))
                     continue
                 segment.text = "[该片段识别失败]"
                 segment.status = SegmentStatus.FAILED
                 segment.error = str(exc)
+                self.reporter.segment_completed(False)
                 return segment
+        self.reporter.segment_completed(False)
         return segment
 
     async def transcribe_all(
@@ -97,15 +110,17 @@ class MiMoTranscriber:
         if fail_fast:
             results: list[SpeakerSegment] = []
             for segment, path in items:
-                result = await self._one(segment, path)
+                result = await self.transcribe_one(segment, path)
                 if result.status is SegmentStatus.FAILED:
                     raise RuntimeError(result.error or "片段识别失败")
                 results.append(result)
         else:
             results = list(
-                await asyncio.gather(*(self._one(segment, path) for segment, path in items))
+                await asyncio.gather(
+                    *(self.transcribe_one(segment, path) for segment, path in items)
+                )
             )
-        return sorted(results, key=lambda item: item.index)
+        return sorted(results, key=lambda item: item.sort_key())
 
 
 def openai_request(api_key: str, timeout: float = 120.0) -> Request:
