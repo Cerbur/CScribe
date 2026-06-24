@@ -14,12 +14,14 @@ else:
 
 from dotenv import load_dotenv
 
+from mimo_transcriber.paragraphs import ParagraphConfig
 from mimo_transcriber.speaker_stability import SpeakerStabilityConfig
 
 Device = Literal["auto", "cpu", "cuda", "mps"]
 Language = Literal["auto", "zh", "en"]
 ConversationMode = Literal["auto", "two-person", "multi"]
 DiarizationStabilizer = Literal["off", "conservative", "balanced", "aggressive"]
+ParagraphMode = Literal["off", "conservative", "balanced", "aggressive"]
 
 
 class ConfigError(RuntimeError):
@@ -38,12 +40,19 @@ class AppConfig:
     conversation_mode: ConversationMode = "auto"
     diarization_stabilizer: DiarizationStabilizer = "balanced"
     diarization_model: str = "pyannote/speaker-diarization-community-1"
+    paragraph_mode: ParagraphMode = "balanced"
+    paragraph_gap: float | None = None
+    paragraph_max_duration: float | None = None
+    paragraph_max_chars: int = 900
     concurrency: int = 2
     requests_per_minute: int = 20
     max_retries: int = 3
     keyword_count: int = 20
     asr: AsrProvider = "mlx"
     stt_model: str | None = None
+    asr_prompt: str | None = None
+    terms_file: Path | None = None
+    term_correction: bool = True
     debug_json: bool = False
     fail_fast: bool = False
     debug: bool = False
@@ -67,13 +76,30 @@ class AppConfig:
             mode=mode,
         )
 
+    def paragraph_config(self) -> ParagraphConfig:
+        mode = "balanced" if self.paragraph_mode == "off" else self.paragraph_mode
+        return ParagraphConfig(
+            enabled=self.paragraph_mode != "off",
+            mode=mode,
+            gap=self.paragraph_gap,
+            max_duration=self.paragraph_max_duration,
+            max_chars=self.paragraph_max_chars,
+        )
+
     def asr_cache_identity(self) -> dict[str, object]:
         from mimo_transcriber.asr.base import AsrConfig
+        from mimo_transcriber.terms import TermConfig, build_terms_prompt, parse_terms_file
 
+        term_config = parse_terms_file(self.terms_file) if self.terms_file else TermConfig()
+        prompt = build_terms_prompt(self.asr_prompt, term_config.terms)
         return AsrConfig(
             provider=self.asr,
             stt_model=self.stt_model,
             language=self.language,
+            prompt=prompt,
+            term_count=len(term_config.terms),
+            term_correction=self.term_correction,
+            terms_file=self.terms_file,
         ).cache_identity()
 
     def cache_parameters(self) -> dict[str, object]:
@@ -101,6 +127,17 @@ class AppConfig:
             raise ConfigError("--max-retries 和 --keyword-count 不能为负数")
         if self.asr not in ("mlx", "mimo"):
             raise ConfigError("--asr 必须是 mlx 或 mimo")
+        if self.terms_file is not None:
+            if not self.terms_file.is_file() or not os.access(self.terms_file, os.R_OK):
+                raise ConfigError(f"--terms-file 不存在或不可读: {self.terms_file}")
+            if len(self.terms_file.read_text(encoding="utf-8").splitlines()) > 1000:
+                raise ConfigError("--terms-file 行数不能超过 1000")
+        if self.paragraph_gap is not None and self.paragraph_gap < 0:
+            raise ConfigError("--paragraph-gap 不能为负数")
+        if self.paragraph_max_duration is not None and self.paragraph_max_duration <= 0:
+            raise ConfigError("--paragraph-max-duration 必须大于 0")
+        if self.paragraph_max_chars <= 0:
+            raise ConfigError("--paragraph-max-chars 必须大于 0")
 
 
 def resolve_device(

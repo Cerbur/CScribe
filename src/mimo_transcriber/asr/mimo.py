@@ -10,6 +10,7 @@ from typing import Any
 from mimo_transcriber.asr.base import AsrEventSink
 from mimo_transcriber.audio import encoded_audio_data
 from mimo_transcriber.models import SegmentStatus, SpeakerSegment
+from mimo_transcriber.terms import correct_terms
 
 Request = Callable[[str, str], Awaitable[Any]]
 Sleep = Callable[[float], Awaitable[None]]
@@ -81,12 +82,16 @@ class MimoAsrEngine:
         sleep: Sleep = asyncio.sleep,
         reporter: object = None,
         event_sink: AsrEventSink | None = None,
+        prompt: str | None = None,
+        term_replacements: Mapping[str, str] | None = None,
     ) -> None:
         from mimo_transcriber.progress import NullProgressReporter
 
         self.request = request
         self.model = model
         self.language = language
+        self.prompt = prompt
+        self.term_replacements = dict(term_replacements or {})
         self.semaphore = asyncio.Semaphore(concurrency)
         self.limiter = RateLimiter(requests_per_minute)
         self.max_retries = max_retries
@@ -125,6 +130,8 @@ class MimoAsrEngine:
                     await self.limiter.wait(self.sleep)
                     completion = await self.request(data_url, self.language)
                 text = extract_content(completion.choices[0].message.content)
+                if self.term_replacements:
+                    text = correct_terms(text, self.term_replacements)
                 if not text:
                     raise ValueError("MiMo 返回了空文本")
                 segment.text = text
@@ -201,7 +208,12 @@ class MimoAsrEngine:
         return sorted(results, key=lambda item: item.sort_key())
 
 
-def openai_request(api_key: str, model: str = "mimo-v2.5-asr", timeout: float = 120.0) -> Request:
+def openai_request(
+    api_key: str,
+    model: str = "mimo-v2.5-asr",
+    timeout: float = 120.0,
+    prompt: str | None = None,
+) -> Request:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(
@@ -212,6 +224,9 @@ def openai_request(api_key: str, model: str = "mimo-v2.5-asr", timeout: float = 
     )
 
     async def request(data_url: str, language: str) -> Any:
+        asr_options: dict[str, object] = {"language": language}
+        if prompt:
+            asr_options["prompt"] = prompt
         return await client.chat.completions.create(
             model=model,
             messages=[{
@@ -221,7 +236,7 @@ def openai_request(api_key: str, model: str = "mimo-v2.5-asr", timeout: float = 
                     "input_audio": {"data": data_url},
                 }],
             }],
-            extra_body={"asr_options": {"language": language}},
+            extra_body={"asr_options": asr_options},
         )
 
     return request

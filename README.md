@@ -68,6 +68,9 @@ uv run mimo-transcriber INPUT [参数]
 | `--device {auto,cpu,cuda,mps}` | `auto` | 说话人分离设备；MPS 为实验性支持 |
 | `--asr {mlx,mimo}` | `mlx` | ASR 引擎；默认本地 MLX Whisper，`mimo` 为远端 MiMo |
 | `--stt-model MODEL` | 引擎默认值 | STT 模型；由所选 ASR 引擎解释 |
+| `--asr-prompt TEXT` | 关闭 | MiMo ASR 提示，引导保留专有名词；本地 MLX 忽略 |
+| `--terms-file PATH` | 关闭 | 术语表，影响 MiMo 转写与 ASR 缓存身份 |
+| `--no-term-correction` | 关闭 | 禁用转写后的显式术语映射纠错 |
 | `--concurrency N` | `2` | ASR worker 数量；MiMo 可并发请求，MLX 首版内部串行推理 |
 | `--requests-per-minute N` | `20` | MiMo 每分钟请求上限；本地 MLX 忽略 |
 | `--max-retries N` | `3` | 每个片段首次失败后的最大重试次数 |
@@ -78,6 +81,18 @@ uv run mimo-transcriber INPUT [参数]
 | `-v, --verbose` | 关闭 | 显示更详细的进度和阶段耗时 |
 
 退出码：`0` 表示全部成功；`1` 表示启动或关键阶段失败；`2` 表示 TXT 已生成，但部分片段转写失败。
+
+## 段落合并输出
+
+CScribe 默认会在输出 TXT 前合并同一说话人的连续短片段。ASR 内部切片不会被改变，`--debug-json` 仍会保留内部片段，并额外输出最终展示 blocks。
+
+常用选项：
+
+```bash
+uv run mimo-transcriber meeting.m4a --paragraph-mode conservative
+uv run mimo-transcriber meeting.m4a --paragraph-mode aggressive --paragraph-gap 2.5
+uv run mimo-transcriber meeting.m4a --no-paragraph-merge
+```
 
 ## 怎么选择 ASR 引擎和 STT 模型
 
@@ -121,6 +136,27 @@ uv run mimo-transcriber meeting.m4a --diarization-stabilizer aggressive --debug-
 ```bash
 uv run mimo-transcriber meeting.m4a --diarization-model pyannote/speaker-diarization-community-1
 ```
+
+## MiMo 术语提示
+
+MiMo ASR 支持通过 prompt 提醒模型保留技术和品牌专有名词。创建 `terms.txt`：
+
+```text
+Facebook
+Grab
+Gleap
+飞书 => Facebook
+格拉布 => Grab
+```
+
+运行：
+
+```bash
+uv run mimo-transcriber meeting.m4a --asr mimo --terms-file terms.txt
+uv run mimo-transcriber meeting.m4a --asr mimo --asr-prompt "中英混杂技术讨论，请保留英文品牌词。"
+```
+
+术语文件变化会改变 ASR 缓存身份，因此会重新转写。
 
 ## 常见问题
 

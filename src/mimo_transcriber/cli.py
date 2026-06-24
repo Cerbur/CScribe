@@ -43,11 +43,23 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "cpu", "cuda", "mps"),
         default="auto",
     )
+    parser.add_argument(
+        "--paragraph-mode",
+        choices=("off", "conservative", "balanced", "aggressive"),
+        default="balanced",
+    )
+    parser.add_argument("--paragraph-gap", type=float)
+    parser.add_argument("--paragraph-max-duration", type=float)
+    parser.add_argument("--paragraph-max-chars", type=int, default=900)
+    parser.add_argument("--no-paragraph-merge", action="store_true")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--requests-per-minute", type=int, default=20)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--asr", choices=("mlx", "mimo"), default="mlx")
     parser.add_argument("--stt-model")
+    parser.add_argument("--asr-prompt")
+    parser.add_argument("--terms-file", type=Path)
+    parser.add_argument("--no-term-correction", action="store_true")
     parser.add_argument("--keyword-count", type=int, default=20)
     parser.add_argument("--debug-json", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
@@ -108,6 +120,8 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
     #   - 进度信息由 TerminalProgressReporter 直接输出，不经过 logging 模块
     _setup_logging(debug=args.debug)
 
+    paragraph_mode = "off" if args.no_paragraph_merge else args.paragraph_mode
+
     config = AppConfig(
         input_path=args.input,
         output_path=args.output,
@@ -119,11 +133,18 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         conversation_mode=args.conversation_mode,
         diarization_stabilizer=args.diarization_stabilizer,
         diarization_model=args.diarization_model,
+        paragraph_mode=paragraph_mode,
+        paragraph_gap=args.paragraph_gap,
+        paragraph_max_duration=args.paragraph_max_duration,
+        paragraph_max_chars=args.paragraph_max_chars,
         concurrency=args.concurrency,
         requests_per_minute=args.requests_per_minute,
         max_retries=args.max_retries,
         asr=args.asr,
         stt_model=args.stt_model,
+        asr_prompt=args.asr_prompt,
+        terms_file=args.terms_file,
+        term_correction=not args.no_term_correction,
         keyword_count=args.keyword_count,
         debug_json=args.debug_json,
         fail_fast=args.fail_fast,

@@ -162,3 +162,58 @@ async def test_openai_request_uses_configured_model(monkeypatch) -> None:
     await request("data:audio/mp3;base64,abc", "en")
 
     assert captured["model"] == "custom-model"
+
+
+@pytest.mark.asyncio
+async def test_openai_request_sends_prompt(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Completions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.chat = type("Chat", (), {"completions": Completions()})()
+
+    monkeypatch.setattr("openai.AsyncOpenAI", FakeClient)
+
+    request = openai_request("key", prompt="Facebook prompt")
+    await request("data:audio/mp3;base64,abc", "zh")
+
+    assert captured["extra_body"]["asr_options"]["prompt"] == "Facebook prompt"
+
+
+@pytest.mark.asyncio
+async def test_mimo_engine_applies_explicit_term_corrections(tmp_path: Path) -> None:
+    audio = tmp_path / "s.mp3"
+    audio.write_bytes(b"audio")
+
+    class Message:
+        content = "飞书 和 格拉布"
+
+    class Choice:
+        message = Message()
+
+    class Completion:
+        choices = [Choice()]
+
+    async def request(data_url, language):
+        return Completion()
+
+    engine = MimoAsrEngine(
+        request=request,
+        model="mimo-v2.5-asr",
+        language="zh",
+        concurrency=1,
+        requests_per_minute=60,
+        max_retries=0,
+        term_replacements={"飞书": "Facebook", "格拉布": "Grab"},
+    )
+
+    result = await engine.transcribe_one(
+        SpeakerSegment(0, 0, 1, "A", segment_id="s0000"), audio
+    )
+
+    assert result.text == "Facebook 和 Grab"

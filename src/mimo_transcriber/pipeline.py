@@ -270,7 +270,11 @@ async def run_pipeline(
                 config.input_path.stat().st_mtime
             )
             write_outputs(
-                outcome, recording_time, config.resolved_output_path, config.debug_json
+                outcome,
+                recording_time,
+                config.resolved_output_path,
+                config.debug_json,
+                paragraph_config=config.paragraph_config(),
             )
 
             manifest.output_written = True
@@ -355,6 +359,9 @@ async def _run_segment_workers(
                 provider=config.asr,
                 stt_model=config.stt_model,
                 language=config.language,
+                prompt=config.asr_prompt,
+                terms_file=config.terms_file,
+                term_correction=config.term_correction,
             ),
             runtime,
             event_sink=None,
