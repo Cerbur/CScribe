@@ -79,6 +79,18 @@ uv run mimo-transcriber INPUT [参数]
 
 退出码：`0` 表示全部成功；`1` 表示启动或关键阶段失败；`2` 表示 TXT 已生成，但部分片段转写失败。
 
+## 段落合并输出
+
+CScribe 默认会在输出 TXT 前合并同一说话人的连续短片段。ASR 内部切片不会被改变，`--debug-json` 仍会保留内部片段，并额外输出最终展示 blocks。
+
+常用选项：
+
+```bash
+uv run mimo-transcriber meeting.m4a --paragraph-mode conservative
+uv run mimo-transcriber meeting.m4a --paragraph-mode aggressive --paragraph-gap 2.5
+uv run mimo-transcriber meeting.m4a --no-paragraph-merge
+```
+
 ## 怎么选择 ASR 引擎和 STT 模型
 
 默认使用本地 MLX Whisper：
