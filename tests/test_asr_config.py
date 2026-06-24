@@ -41,3 +41,12 @@ def test_custom_model_changes_identity() -> None:
         "model": "mlx-community/whisper-small",
         "language": "auto",
     }
+
+
+def test_prompt_digest_changes_asr_identity() -> None:
+    base = AsrConfig(provider="mimo", language="zh")
+    prompted = AsrConfig(provider="mimo", language="zh", prompt="Facebook", term_count=1)
+
+    assert base.cache_identity() != prompted.cache_identity()
+    assert prompted.cache_identity()["settings"]["prompt_digest"].startswith("sha256:")
+    assert prompted.cache_identity()["settings"]["term_count"] == 1

@@ -34,6 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--asr", choices=("mlx", "mimo"), default="mlx")
     parser.add_argument("--stt-model")
+    parser.add_argument("--asr-prompt")
+    parser.add_argument("--terms-file", type=Path)
+    parser.add_argument("--no-term-correction", action="store_true")
     parser.add_argument("--keyword-count", type=int, default=20)
     parser.add_argument("--debug-json", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
@@ -107,6 +110,9 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         max_retries=args.max_retries,
         asr=args.asr,
         stt_model=args.stt_model,
+        asr_prompt=args.asr_prompt,
+        terms_file=args.terms_file,
+        term_correction=not args.no_term_correction,
         keyword_count=args.keyword_count,
         debug_json=args.debug_json,
         fail_fast=args.fail_fast,

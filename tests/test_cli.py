@@ -49,3 +49,16 @@ def test_parser_accepts_mimo_asr_and_model() -> None:
 
     assert args.asr == "mimo"
     assert args.stt_model == "mimo-v2.5-asr"
+
+
+def test_cli_parses_terms_options() -> None:
+    args = build_parser().parse_args([
+        "meeting.m4a",
+        "--asr-prompt", "技术会议",
+        "--terms-file", "terms.txt",
+        "--no-term-correction",
+    ])
+
+    assert args.asr_prompt == "技术会议"
+    assert str(args.terms_file) == "terms.txt"
+    assert args.no_term_correction is True

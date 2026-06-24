@@ -66,3 +66,16 @@ def test_mimo_runtime_requires_mimo_key(
 
     with pytest.raises(ConfigError, match="缺少 MIMO_API_KEY"):
         validate_runtime(AppConfig(input_path=source, asr="mimo"))
+
+
+def test_terms_file_must_exist(tmp_path: Path) -> None:
+    config = AppConfig(input_path=tmp_path / "in.m4a", terms_file=tmp_path / "missing.txt")
+
+    with pytest.raises(ConfigError, match="--terms-file"):
+        config.validate_arguments()
+
+
+def test_asr_prompt_blank_is_allowed(tmp_path: Path) -> None:
+    config = AppConfig(input_path=tmp_path / "in.m4a", asr_prompt="   ")
+
+    config.validate_arguments()

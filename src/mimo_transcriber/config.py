@@ -37,6 +37,9 @@ class AppConfig:
     keyword_count: int = 20
     asr: AsrProvider = "mlx"
     stt_model: str | None = None
+    asr_prompt: str | None = None
+    terms_file: Path | None = None
+    term_correction: bool = True
     debug_json: bool = False
     fail_fast: bool = False
     debug: bool = False
@@ -79,6 +82,11 @@ class AppConfig:
             raise ConfigError("--max-retries 和 --keyword-count 不能为负数")
         if self.asr not in ("mlx", "mimo"):
             raise ConfigError("--asr 必须是 mlx 或 mimo")
+        if self.terms_file is not None:
+            if not self.terms_file.is_file() or not os.access(self.terms_file, os.R_OK):
+                raise ConfigError(f"--terms-file 不存在或不可读: {self.terms_file}")
+            if len(self.terms_file.read_text(encoding="utf-8").splitlines()) > 1000:
+                raise ConfigError("--terms-file 行数不能超过 1000")
 
 
 def resolve_device(
