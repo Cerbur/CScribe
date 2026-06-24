@@ -65,6 +65,9 @@ uv run mimo-transcriber INPUT [参数]
 | `--device {auto,cpu,cuda,mps}` | `auto` | 说话人分离设备；MPS 为实验性支持 |
 | `--asr {mlx,mimo}` | `mlx` | ASR 引擎；默认本地 MLX Whisper，`mimo` 为远端 MiMo |
 | `--stt-model MODEL` | 引擎默认值 | STT 模型；由所选 ASR 引擎解释 |
+| `--asr-prompt TEXT` | 关闭 | MiMo ASR 提示，引导保留专有名词；本地 MLX 忽略 |
+| `--terms-file PATH` | 关闭 | 术语表，影响 MiMo 转写与 ASR 缓存身份 |
+| `--no-term-correction` | 关闭 | 禁用转写后的显式术语映射纠错 |
 | `--concurrency N` | `2` | ASR worker 数量；MiMo 可并发请求，MLX 首版内部串行推理 |
 | `--requests-per-minute N` | `20` | MiMo 每分钟请求上限；本地 MLX 忽略 |
 | `--max-retries N` | `3` | 每个片段首次失败后的最大重试次数 |
@@ -97,6 +100,27 @@ uv run mimo-transcriber meeting.m4a --asr mimo --stt-model mimo-v2.5-asr
 ```
 
 `--stt-model` 对上层流水线透明，由所选 ASR 引擎解释。切换 ASR 引擎或模型会改变缓存身份，避免复用旧模型的转写结果。
+
+## MiMo 术语提示
+
+MiMo ASR 支持通过 prompt 提醒模型保留技术和品牌专有名词。创建 `terms.txt`：
+
+```text
+Facebook
+Grab
+Gleap
+飞书 => Facebook
+格拉布 => Grab
+```
+
+运行：
+
+```bash
+uv run mimo-transcriber meeting.m4a --asr mimo --terms-file terms.txt
+uv run mimo-transcriber meeting.m4a --asr mimo --asr-prompt "中英混杂技术讨论，请保留英文品牌词。"
+```
+
+术语文件变化会改变 ASR 缓存身份，因此会重新转写。
 
 ## 常见问题
 

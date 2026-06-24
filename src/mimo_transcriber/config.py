@@ -51,11 +51,18 @@ class AppConfig:
 
     def asr_cache_identity(self) -> dict[str, object]:
         from mimo_transcriber.asr.base import AsrConfig
+        from mimo_transcriber.terms import TermConfig, build_terms_prompt, parse_terms_file
 
+        term_config = parse_terms_file(self.terms_file) if self.terms_file else TermConfig()
+        prompt = build_terms_prompt(self.asr_prompt, term_config.terms)
         return AsrConfig(
             provider=self.asr,
             stt_model=self.stt_model,
             language=self.language,
+            prompt=prompt,
+            term_count=len(term_config.terms),
+            term_correction=self.term_correction,
+            terms_file=self.terms_file,
         ).cache_identity()
 
     def cache_parameters(self) -> dict[str, object]:

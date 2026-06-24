@@ -676,3 +676,19 @@ async def test_pipeline_records_success_through_manifest_projection(tmp_path: Pa
     assert result.exit_code == 0
     assert result.outcome.segments[0].text == "projected"
     assert output.read_text(encoding="utf-8")
+
+
+def test_pipeline_includes_terms_in_asr_cache_identity(tmp_path: Path) -> None:
+    terms = tmp_path / "terms.txt"
+    terms.write_text("Facebook\n", encoding="utf-8")
+    config = AppConfig(
+        input_path=tmp_path / "in.m4a",
+        asr="mimo",
+        asr_prompt="技术会议",
+        terms_file=terms,
+    )
+
+    identity = config.asr_cache_identity()
+
+    assert identity["settings"]["prompt_digest"].startswith("sha256:")
+    assert identity["settings"]["term_count"] == 1
