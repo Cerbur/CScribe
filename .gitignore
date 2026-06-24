@@ -13,3 +13,4 @@ dist/
 *.m4a
 .models/
 .run/
+.worktrees/
