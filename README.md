@@ -58,9 +58,12 @@ uv run mimo-transcriber INPUT [参数]
 | --- | --- | --- |
 | `INPUT` | 必填 | 本地 M4A 文件 |
 | `-o, --output PATH` | 输入文件同名 TXT | 输出路径 |
-| `--num-speakers N` | 自动估计 | 准确的说话人数 |
+| `--num-speakers N` | 自动估计 | 准确的说话人数；显式指定时优先于 `--conversation-mode` |
 | `--min-speakers N` | `1` | 自动估计人数下限 |
 | `--max-speakers N` | `6` | 自动估计人数上限 |
+| `--conversation-mode {auto,two-person,multi}` | `auto` | 对话模式；`two-person` 在未显式指定人数时按 2 人运行 pyannote |
+| `--diarization-stabilizer {off,conservative,balanced,aggressive}` | `balanced` | 说话人归属后处理强度；`off` 关闭稳定器 |
+| `--diarization-model MODEL` | `pyannote/speaker-diarization-community-1` | pyannote 说话人分离模型 ID |
 | `--language {auto,zh,en}` | `auto` | 转写语言 |
 | `--device {auto,cpu,cuda,mps}` | `auto` | 说话人分离设备；MPS 为实验性支持 |
 | `--asr {mlx,mimo}` | `mlx` | ASR 引擎；默认本地 MLX Whisper，`mimo` 为远端 MiMo |
@@ -97,6 +100,27 @@ uv run mimo-transcriber meeting.m4a --asr mimo --stt-model mimo-v2.5-asr
 ```
 
 `--stt-model` 对上层流水线透明，由所选 ASR 引擎解释。切换 ASR 引擎或模型会改变缓存身份，避免复用旧模型的转写结果。
+
+## 2 人对话说话人稳定
+
+2 人录音建议固定说话人数：
+
+```bash
+uv run mimo-transcriber meeting.m4a --conversation-mode two-person
+```
+
+这会在未显式传 `--num-speakers` 时按 `--num-speakers 2` 运行 pyannote，并启用默认 `balanced` 后处理稳定器。显式 `--num-speakers` 始终优先于 `--conversation-mode`。稳定器只调整说话人归属与重叠去重，不会修改转写文本。对照调试：
+
+```bash
+uv run mimo-transcriber meeting.m4a --diarization-stabilizer off --debug-json
+uv run mimo-transcriber meeting.m4a --diarization-stabilizer aggressive --debug-json
+```
+
+开启 `--debug-json` 时，调试 JSON 会包含 `speaker_stability` 诊断（`dropped_overlaps`、`relabeled_islands` 等）。如需 A/B 本地模型：
+
+```bash
+uv run mimo-transcriber meeting.m4a --diarization-model pyannote/speaker-diarization-community-1
+```
 
 ## 常见问题
 

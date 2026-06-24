@@ -60,3 +60,12 @@ def test_cli_parses_diarization_stability_options() -> None:
 
     assert args.conversation_mode == "two-person"
     assert args.diarization_stabilizer == "aggressive"
+
+
+def test_cli_parses_diarization_model() -> None:
+    args = build_parser().parse_args([
+        "meeting.m4a",
+        "--diarization-model", "local/model",
+    ])
+
+    assert args.diarization_model == "local/model"

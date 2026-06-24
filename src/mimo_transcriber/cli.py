@@ -33,6 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("off", "conservative", "balanced", "aggressive"),
         default="balanced",
     )
+    parser.add_argument(
+        "--diarization-model",
+        default="pyannote/speaker-diarization-community-1",
+    )
     parser.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
     parser.add_argument(
         "--device",
@@ -114,6 +118,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         device=args.device,
         conversation_mode=args.conversation_mode,
         diarization_stabilizer=args.diarization_stabilizer,
+        diarization_model=args.diarization_model,
         concurrency=args.concurrency,
         requests_per_minute=args.requests_per_minute,
         max_retries=args.max_retries,
