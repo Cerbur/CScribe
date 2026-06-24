@@ -11,3 +11,5 @@ __pycache__/
 dist/
 *.egg-info/
 *.m4a
+.models/
+.run/

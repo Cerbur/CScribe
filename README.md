@@ -110,6 +110,12 @@ uv run mimo-transcriber meeting.m4a --asr mimo --stt-model mimo-v2.5-asr
 
 - **CUDA 不可用或 MPS 自动回退 CPU**：先改用 `--device cpu`。MPS 兼容性取决于 macOS、Python、PyTorch 和 pyannote 的版本组合，可配合 `--debug` 查看原因。
 
+- **首次本地 MLX 转写卡住或非常慢**：首次运行需要下载约 1.5 GB 的 Whisper 权重到项目本地的 `<repo>/.models/`（可用 `CSCRIBE_MODEL_CACHE` 环境变量改路径）。下载走直连以绕过系统代理与 `hf_xet`，并支持断点续传与自动重试；网络较慢时会持续较长时间，可随时中断后再次执行相同命令继续下载。需要更小的模型可加 `--stt-model mlx-community/whisper-small`。
+
+- **模型缓存都放在哪里**：说话人分离（pyannote）和 MLX Whisper 权重都缓存在项目目录的 `<repo>/.models/` 下（已 gitignore，不进版本库）。其中 pyannote 走 `huggingface_hub`，缓存根目录是 `<repo>/.models/hf`（即 `HF_HOME`），可在启动前用 `HF_HOME` 环境变量覆盖；MLX 权重用自定义直连下载器，单独存放在 `<repo>/.models/` 平铺目录，可用 `CSCRIBE_MODEL_CACHE` 覆盖。
+
+- **代理环境下下载停滞在 0 字节**：本机的系统代理会拖住大文件传输。CScribe 的模型下载默认直连，不受系统 `*_PROXY` 与 macOS 系统代理影响。
+
 - **第二个相同任务无法启动**：同一任务有进程锁，防止重复发送 API 请求。等待前一个任务结束后再运行。
 
 ## 开源协议

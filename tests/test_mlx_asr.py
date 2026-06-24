@@ -84,3 +84,35 @@ async def test_mlx_engine_returns_results_in_sort_order(tmp_path: Path) -> None:
     result = await engine.transcribe_all(list(zip(segments, paths)), False)
 
     assert [item.segment_id for item in result] == ["s0000", "s0001"]
+
+
+@pytest.mark.asyncio
+async def test_mlx_engine_resolves_model_to_local_path_once(tmp_path: Path) -> None:
+    """With a model_resolver, the engine downloads once (under a lock) and passes
+    the local path — not the raw repo id — to mlx_whisper."""
+    calls: list[dict[str, object]] = []
+    resolves: list[str] = []
+
+    def fake_transcribe(path: str, **kwargs: object) -> dict[str, object]:
+        calls.append({"path": path, **kwargs})
+        return {"text": "ok"}
+
+    def resolve(repo_id: str) -> str:
+        resolves.append(repo_id)
+        return str(tmp_path / "local-model")
+
+    audio = tmp_path / "s0000.mp3"
+    audio.write_bytes(b"audio")
+    segment = SpeakerSegment(0, 0, 1, "A", segment_id="s0000")
+    engine = MlxAsrEngine(
+        AsrConfig(provider="mlx"),
+        fake_transcribe,
+        model_resolver=resolve,
+    )
+
+    # Two segments, two concurrent _call_transcribe invocations -> one download.
+    await engine.transcribe_one(segment, audio)
+    await engine.transcribe_one(segment, audio)
+
+    assert resolves == ["mlx-community/whisper-large-v3-turbo"]
+    assert all(c["path_or_hf_repo"] == str(tmp_path / "local-model") for c in calls)

@@ -136,4 +136,6 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
 
 
 def main() -> None:
+    # HF / pyannote 缓存重定向由 mimo_transcriber 包导入时无条件完成
+    # （见 mimo_transcriber/__init__.py），CLI 入口无需再处理。
     raise SystemExit(asyncio.run(async_main()))

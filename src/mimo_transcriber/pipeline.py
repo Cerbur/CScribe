@@ -27,6 +27,7 @@ from mimo_transcriber.formatter import write_outputs
 from mimo_transcriber.keywords import extract_keywords
 from mimo_transcriber.manifest import ManifestStore, SegmentRecord, TaskIdentity, TaskManifest
 from mimo_transcriber.models import RunSummary, SegmentStatus, SpeakerSegment, TranscriptionOutcome
+from mimo_transcriber.paths import task_cache_dir
 from mimo_transcriber.progress import NullProgressReporter, ProgressReporter
 from mimo_transcriber.segments import process_segments, split_segment
 
@@ -155,7 +156,7 @@ async def run_pipeline(
     if reporter is None:
         reporter = NullProgressReporter()
     if cache_root is None:
-        cache_root = Path("/tmp/cscribe")
+        cache_root = task_cache_dir()
 
     started = time.monotonic()
     fingerprint = fingerprint_input(config.input_path)
@@ -355,7 +356,12 @@ async def _run_segment_workers(
     else:
         client = None
 
-    # Enqueue work: pending/failed segments need slicing; ready slices go direct to transcription
+    # Enqueue work: pending/failed segments need slicing; ready slices go direct to transcription.
+    # Pre-sliced segments are collected and fed to the transcription queue only AFTER the
+    # transcription workers start. The queue is bounded, so enqueueing into it before any
+    # consumer exists would block forever once it fills (more ready slices than capacity) and
+    # deadlock the pipeline on resume.
+    ready_to_transcribe: list[tuple[SegmentRecord, Path]] = []
     pending = 0
     paths.audio_dir.mkdir(parents=True, exist_ok=True)
     for record in work_items:
@@ -364,7 +370,7 @@ async def _run_segment_workers(
         if record.slice_status == "ready":
             audio_path = paths.audio_dir / f"{record.segment.segment_id}.mp3"
             if audio_path.exists() and audio_path.stat().st_size > 0:
-                await transcribe_queue.put((record, audio_path))
+                ready_to_transcribe.append((record, audio_path))
                 pending += 1
                 continue
         # Need slicing
@@ -524,6 +530,11 @@ async def _run_segment_workers(
         asyncio.create_task(_transcribe_worker())
         for _ in range(config.concurrency)
     ]
+
+    # Feed pre-sliced segments now that transcription workers are draining the queue.
+    # The bounded put applies backpressure but can no longer deadlock.
+    for record, audio_path in ready_to_transcribe:
+        await transcribe_queue.put((record, audio_path))
 
     try:
         # Wait for all work to be queued

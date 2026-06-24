@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from mimo_transcriber.config import AppConfig
+from mimo_transcriber.paths import task_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ class TaskPaths:
         cls,
         config: AppConfig,
         fingerprint: InputFingerprint,
-        root: Path = Path("/tmp/cscribe"),
+        root: Path = task_cache_dir(),
     ) -> TaskPaths:
         params = config.cache_parameters()
         identity = {

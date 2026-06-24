@@ -3,6 +3,7 @@ from __future__ import annotations
 from mimo_transcriber.asr.base import AsrConfig, AsrEngine, AsrEventSink, RuntimeConfig
 from mimo_transcriber.asr.mimo import MimoAsrEngine, openai_request
 from mimo_transcriber.asr.mlx import MlxAsrEngine
+from mimo_transcriber.asr.model_download import ensure_model, make_stderr_progress
 from mimo_transcriber.config import ConfigError
 
 
@@ -16,7 +17,12 @@ def create_asr_engine(
     max_retries: int = 3,
 ) -> AsrEngine:
     if config.provider == "mlx":
-        return MlxAsrEngine(config)
+        progress = make_stderr_progress()
+
+        def _resolve(repo_id: str) -> str:
+            return str(ensure_model(repo_id, on_progress=progress))
+
+        return MlxAsrEngine(config, model_resolver=_resolve)
     if config.provider == "mimo":
         if not runtime.mimo_api_key:
             raise ConfigError("缺少 MIMO_API_KEY，请写入环境变量或 .env")

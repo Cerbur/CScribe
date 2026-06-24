@@ -551,6 +551,97 @@ async def test_end_to_end_resume_from_interruption_and_complete(
 
 
 @pytest.mark.asyncio
+async def test_resume_with_many_ready_slices_does_not_deadlock(tmp_path: Path) -> None:
+    """Regression: on resume, pre-sliced segments were enqueued into the bounded
+    transcription queue *before* any transcription worker existed. With more ready
+    slices than the queue capacity (maxsize = max(2, 2*concurrency) = 4), the
+    enqueue loop blocked forever on the Nth put. This must complete, not hang."""
+    from mimo_transcriber.cache import TaskPaths as TP, fingerprint_input as fp
+    from mimo_transcriber.manifest import (
+        ManifestStore,
+        SegmentRecord,
+        TaskIdentity,
+        TaskManifest,
+    )
+
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 6, "aac", 48000, 2, None)
+    config = AppConfig(input_path=source, output_path=output, num_speakers=6)
+
+    fingerprint = fp(source)
+    paths = TP.for_run(config, fingerprint, tmp_path)
+
+    # Build a recovered manifest: normalize + diarize already done, six segments
+    # whose slices already exist on disk and are marked ready (> queue capacity).
+    paths.normalized.parent.mkdir(parents=True, exist_ok=True)
+    paths.normalized.write_bytes(b"wav")
+    paths.audio_dir.mkdir(parents=True, exist_ok=True)
+    segments: list[SpeakerSegment] = []
+    records: list[SegmentRecord] = []
+    for index in range(6):
+        seg = SpeakerSegment(index, float(index), float(index + 1), "A", segment_id=f"s{index:04d}")
+        slice_path = paths.audio_dir / f"{seg.segment_id}.mp3"
+        slice_path.write_bytes(b"mp3-bytes")
+        segments.append(seg)
+        records.append(
+            SegmentRecord(
+                segment=seg,
+                slice_status="ready",
+                slice_bytes=slice_path.stat().st_size,
+                transcript_status="pending",
+            )
+        )
+    manifest = TaskManifest(
+        identity=TaskIdentity(
+            task_hash=paths.task_hash,
+            fingerprint_size=fingerprint.size,
+            fingerprint_mtime_ns=fingerprint.mtime_ns,
+            fingerprint_sha256=fingerprint.content_sha256,
+        ),
+        metadata_source_path=str(source),
+        metadata_duration=metadata.duration_seconds,
+        metadata_codec=metadata.codec,
+        metadata_sample_rate=metadata.sample_rate,
+        metadata_channels=metadata.channels,
+        metadata_creation_time=None,
+        normalize_status="ready",
+        diarization_status="ready",
+        segments=records,
+    )
+    ManifestStore(paths.manifest).save(manifest)
+
+    transcribed: list[str] = []
+
+    async def transcribe(items, fail_fast):
+        for seg, _path in items:
+            transcribed.append(seg.segment_id)
+            seg.text = "完成"
+            seg.status = SegmentStatus.SUCCESS
+        return [item[0] for item in items]
+
+    deps = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda src, target: target.write_bytes(b"wav"),
+        create_preflight=lambda src, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([]),
+        slice_audio=lambda src, seg, target: target.write_bytes(b"mp3"),
+        payload_fits=lambda path, seg: True,
+        transcribe=transcribe,
+    )
+
+    result = await asyncio.wait_for(
+        run_pipeline(config, RuntimeConfig(hf_token="hf", mimo_api_key="mimo"), deps, cache_root=tmp_path),
+        timeout=20.0,
+    )
+
+    assert result.exit_code == 0
+    assert sorted(transcribed) == [f"s{i:04d}" for i in range(6)]
+    assert output.exists()
+
+
+@pytest.mark.asyncio
 async def test_pipeline_records_success_through_manifest_projection(tmp_path: Path) -> None:
     source = tmp_path / "input.m4a"
     source.write_bytes(b"audio")
