@@ -66,6 +66,11 @@ uv run mimo-transcriber INPUT [参数]
 | `--diarization-model MODEL` | `pyannote/speaker-diarization-community-1` | pyannote 说话人分离模型 ID |
 | `--language {auto,zh,en}` | `auto` | 转写语言 |
 | `--device {auto,cpu,cuda,mps}` | `auto` | 说话人分离设备；MPS 为实验性支持 |
+| `--paragraph-mode {off,conservative,balanced,aggressive}` | `balanced` | 同说话人连续片段合并强度；`off` 关闭合并 |
+| `--paragraph-gap 秒` | 按模式 | 段落合并的间隔阈值 |
+| `--paragraph-max-duration 秒` | 按模式 | 合并后单块最大时长 |
+| `--paragraph-max-chars N` | `900` | 合并后单块最大字符数 |
+| `--no-paragraph-merge` | 关闭 | `--paragraph-mode off` 的易用别名 |
 | `--asr {mlx,mimo}` | `mlx` | ASR 引擎；默认本地 MLX Whisper，`mimo` 为远端 MiMo |
 | `--stt-model MODEL` | 引擎默认值 | STT 模型；由所选 ASR 引擎解释 |
 | `--asr-prompt TEXT` | 关闭 | MiMo ASR 提示，引导保留专有名词；本地 MLX 忽略 |
