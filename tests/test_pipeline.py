@@ -692,3 +692,52 @@ def test_pipeline_includes_terms_in_asr_cache_identity(tmp_path: Path) -> None:
 
     assert identity["settings"]["prompt_digest"].startswith("sha256:")
     assert identity["settings"]["term_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_passes_paragraph_config_to_formatter(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_write_outputs(outcome, recording_time, output_path, debug_json, paragraph_config=None):
+        captured["paragraph_config"] = paragraph_config
+        output_path.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("mimo_transcriber.pipeline.write_outputs", fake_write_outputs)
+
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 1, "aac", 48000, 2, datetime(2026, 1, 1, 9))
+
+    async def transcribe(items, fail_fast):
+        segment = items[0][0]
+        segment.text = "完成"
+        segment.status = SegmentStatus.SUCCESS
+        return [segment]
+
+    dependencies = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda source, target: target.write_bytes(b"wav"),
+        create_preflight=lambda source, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 1, "A"),
+        ]),
+        slice_audio=lambda source, segment, target: target.write_bytes(b"mp3"),
+        payload_fits=lambda path, segment: True,
+        transcribe=transcribe,
+    )
+
+    await run_pipeline(
+        AppConfig(
+            input_path=source,
+            output_path=output,
+            num_speakers=1,
+            paragraph_mode="aggressive",
+        ),
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
+        dependencies,
+        cache_root=tmp_path,
+    )
+
+    assert captured["paragraph_config"].enabled is True
+    assert captured["paragraph_config"].mode == "aggressive"

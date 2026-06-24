@@ -261,7 +261,11 @@ async def run_pipeline(
                 config.input_path.stat().st_mtime
             )
             write_outputs(
-                outcome, recording_time, config.resolved_output_path, config.debug_json
+                outcome,
+                recording_time,
+                config.resolved_output_path,
+                config.debug_json,
+                paragraph_config=config.paragraph_config(),
             )
 
             manifest.output_written = True
