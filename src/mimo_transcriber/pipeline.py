@@ -30,6 +30,7 @@ from mimo_transcriber.models import RunSummary, SegmentStatus, SpeakerSegment, T
 from mimo_transcriber.paths import task_cache_dir
 from mimo_transcriber.progress import NullProgressReporter, ProgressReporter
 from mimo_transcriber.segments import process_segments, split_segment
+from mimo_transcriber.speaker_stability import stabilize_speakers
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,7 @@ async def run_pipeline(
 
             # Stage 4: Diarization (recoverable)
             reporter.start_stage("说话人分离")
+            speaker_stability = None
             if manifest.diarization_status == "ready" and manifest.segments:
                 # Recover segments from manifest
                 logger.debug("说话人分离复用缓存，片段数: %d", len(manifest.segments))
@@ -216,6 +218,11 @@ async def run_pipeline(
                 )
                 raw = diarization.segments
                 segments = process_segments(raw, metadata.duration_seconds)
+                stability = stabilize_speakers(
+                    segments, config.speaker_stability_config()
+                )
+                segments = stability.segments
+                speaker_stability = stability.diagnostics
                 manifest.diarization_status = "ready"
                 manifest.diarization_device = diarization.decision.selected_device
                 manifest.segments = [SegmentRecord.from_segment(seg) for seg in segments]
@@ -256,6 +263,7 @@ async def run_pipeline(
                     output_path=config.resolved_output_path,
                     temp_path=paths.work_dir if outcome_has_failure else None,
                 ),
+                speaker_stability=speaker_stability,
             )
 
             recording_time = metadata.creation_time or datetime.fromtimestamp(

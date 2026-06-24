@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 
 class SegmentStatus(StrEnum):
@@ -60,6 +61,7 @@ class TranscriptionOutcome:
     segments: list[SpeakerSegment]
     keywords: list[str] = field(default_factory=list)
     summary: RunSummary = field(default_factory=RunSummary)
+    speaker_stability: Any | None = None
 
     @property
     def has_failures(self) -> bool:

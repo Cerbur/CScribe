@@ -81,5 +81,7 @@ def write_outputs(
             "speakers": len({item.raw_speaker for item in outcome.segments}),
             "segments": [asdict(item) for item in outcome.segments],
         }
+        if outcome.speaker_stability is not None:
+            payload["speaker_stability"] = asdict(outcome.speaker_stability)
         json_path = output_path.with_suffix(".segments.json")
         _atomic_write(json_path, json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n")

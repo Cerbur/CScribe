@@ -676,3 +676,51 @@ async def test_pipeline_records_success_through_manifest_projection(tmp_path: Pa
     assert result.exit_code == 0
     assert result.outcome.segments[0].text == "projected"
     assert output.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_pipeline_applies_speaker_stabilizer_before_slicing(tmp_path: Path) -> None:
+    sliced: list[str] = []
+
+    def fake_slice(source: Path, segment: SpeakerSegment, target: Path) -> None:
+        sliced.append(segment.raw_speaker)
+        target.write_bytes(b"mp3")
+
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    output = tmp_path / "output.txt"
+    metadata = AudioMetadata(source, 7, "aac", 48000, 2, datetime(2026, 1, 1, 9))
+
+    async def transcribe(items, fail_fast):
+        segment = items[0][0]
+        segment.text = "ok"
+        segment.status = SegmentStatus.SUCCESS
+        return [segment]
+
+    dependencies = PipelineDependencies(
+        probe=lambda path: metadata,
+        normalize=lambda source, target: target.write_bytes(b"wav"),
+        create_preflight=lambda source, target: target.write_bytes(b"sample"),
+        diarize=lambda *args, **kwargs: diarization_result([
+            SpeakerSegment(-1, 0, 3, "A"),
+            SpeakerSegment(-1, 3.2, 4.0, "B"),
+            SpeakerSegment(-1, 4.2, 7, "A"),
+        ]),
+        slice_audio=fake_slice,
+        payload_fits=lambda path, segment: True,
+        transcribe=transcribe,
+    )
+
+    await run_pipeline(
+        AppConfig(
+            input_path=source,
+            output_path=output,
+            num_speakers=2,
+            diarization_stabilizer="balanced",
+        ),
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
+        dependencies,
+        cache_root=tmp_path,
+    )
+
+    assert sliced == ["A", "A", "A"]

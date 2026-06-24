@@ -5,6 +5,7 @@ from mimo_transcriber.formatter import (
     format_duration,
     format_timestamp,
     render_transcript,
+    write_outputs,
 )
 from mimo_transcriber.models import (
     AudioMetadata,
@@ -12,6 +13,7 @@ from mimo_transcriber.models import (
     SpeakerSegment,
     TranscriptionOutcome,
 )
+from mimo_transcriber.speaker_stability import SpeakerStabilityDiagnostics
 
 
 def test_time_formats() -> None:
@@ -51,3 +53,26 @@ def test_render_transcript_uses_time_then_segment_id_order() -> None:
     )
     rendered = render_transcript(outcome, datetime(2026, 6, 15, 10, 0))
     assert rendered.index("先") < rendered.index("后")
+
+
+def test_debug_json_can_include_speaker_stability(tmp_path: Path) -> None:
+    metadata = AudioMetadata(tmp_path / "input.m4a", 3, "aac", 48000, 2, None)
+    outcome = TranscriptionOutcome(
+        metadata=metadata,
+        segments=[
+            SpeakerSegment(0, 0, 1, "A", "说话人 1", "你好", SegmentStatus.SUCCESS),
+        ],
+    )
+    outcome.speaker_stability = SpeakerStabilityDiagnostics(
+        enabled=True,
+        mode="balanced",
+        dropped_overlaps=1,
+        relabeled_islands=2,
+    )
+    output = tmp_path / "out.txt"
+
+    write_outputs(outcome, datetime(2026, 6, 24, 10, 0), output, debug_json=True)
+
+    debug = output.with_suffix(".segments.json").read_text(encoding="utf-8")
+    assert '"speaker_stability"' in debug
+    assert '"dropped_overlaps": 1' in debug
