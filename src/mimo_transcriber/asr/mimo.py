@@ -81,12 +81,16 @@ class MimoAsrEngine:
         sleep: Sleep = asyncio.sleep,
         reporter: object = None,
         event_sink: AsrEventSink | None = None,
+        prompt: str | None = None,
+        term_replacements: Mapping[str, str] | None = None,
     ) -> None:
         from mimo_transcriber.progress import NullProgressReporter
 
         self.request = request
         self.model = model
         self.language = language
+        self.prompt = prompt
+        self.term_replacements = dict(term_replacements or {})
         self.semaphore = asyncio.Semaphore(concurrency)
         self.limiter = RateLimiter(requests_per_minute)
         self.max_retries = max_retries
