@@ -14,8 +14,11 @@ else:
 
 from dotenv import load_dotenv
 
+from mimo_transcriber.paragraphs import ParagraphConfig
+
 Device = Literal["auto", "cpu", "cuda", "mps"]
 Language = Literal["auto", "zh", "en"]
+ParagraphMode = Literal["off", "conservative", "balanced", "aggressive"]
 
 
 class ConfigError(RuntimeError):
@@ -31,6 +34,10 @@ class AppConfig:
     max_speakers: int = 6
     language: Language = "auto"
     device: Device = "auto"
+    paragraph_mode: ParagraphMode = "balanced"
+    paragraph_gap: float | None = None
+    paragraph_max_duration: float | None = None
+    paragraph_max_chars: int = 900
     concurrency: int = 2
     requests_per_minute: int = 20
     max_retries: int = 3
@@ -48,6 +55,16 @@ class AppConfig:
     @property
     def resolved_output_path(self) -> Path:
         return self.output_path or self.input_path.with_suffix(".txt")
+
+    def paragraph_config(self) -> ParagraphConfig:
+        mode = "balanced" if self.paragraph_mode == "off" else self.paragraph_mode
+        return ParagraphConfig(
+            enabled=self.paragraph_mode != "off",
+            mode=mode,
+            gap=self.paragraph_gap,
+            max_duration=self.paragraph_max_duration,
+            max_chars=self.paragraph_max_chars,
+        )
 
     def asr_cache_identity(self) -> dict[str, object]:
         from mimo_transcriber.asr.base import AsrConfig
@@ -94,6 +111,12 @@ class AppConfig:
                 raise ConfigError(f"--terms-file 不存在或不可读: {self.terms_file}")
             if len(self.terms_file.read_text(encoding="utf-8").splitlines()) > 1000:
                 raise ConfigError("--terms-file 行数不能超过 1000")
+        if self.paragraph_gap is not None and self.paragraph_gap < 0:
+            raise ConfigError("--paragraph-gap 不能为负数")
+        if self.paragraph_max_duration is not None and self.paragraph_max_duration <= 0:
+            raise ConfigError("--paragraph-max-duration 必须大于 0")
+        if self.paragraph_max_chars <= 0:
+            raise ConfigError("--paragraph-max-chars 必须大于 0")
 
 
 def resolve_device(

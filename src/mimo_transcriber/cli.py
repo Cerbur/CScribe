@@ -29,6 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "cpu", "cuda", "mps"),
         default="auto",
     )
+    parser.add_argument(
+        "--paragraph-mode",
+        choices=("off", "conservative", "balanced", "aggressive"),
+        default="balanced",
+    )
+    parser.add_argument("--paragraph-gap", type=float)
+    parser.add_argument("--paragraph-max-duration", type=float)
+    parser.add_argument("--paragraph-max-chars", type=int, default=900)
+    parser.add_argument("--no-paragraph-merge", action="store_true")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--requests-per-minute", type=int, default=20)
     parser.add_argument("--max-retries", type=int, default=3)
@@ -97,6 +106,8 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
     #   - 进度信息由 TerminalProgressReporter 直接输出，不经过 logging 模块
     _setup_logging(debug=args.debug)
 
+    paragraph_mode = "off" if args.no_paragraph_merge else args.paragraph_mode
+
     config = AppConfig(
         input_path=args.input,
         output_path=args.output,
@@ -105,6 +116,10 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         max_speakers=args.max_speakers,
         language=args.language,
         device=args.device,
+        paragraph_mode=paragraph_mode,
+        paragraph_gap=args.paragraph_gap,
+        paragraph_max_duration=args.paragraph_max_duration,
+        paragraph_max_chars=args.paragraph_max_chars,
         concurrency=args.concurrency,
         requests_per_minute=args.requests_per_minute,
         max_retries=args.max_retries,

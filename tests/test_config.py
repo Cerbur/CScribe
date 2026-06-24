@@ -79,3 +79,25 @@ def test_asr_prompt_blank_is_allowed(tmp_path: Path) -> None:
     config = AppConfig(input_path=tmp_path / "in.m4a", asr_prompt="   ")
 
     config.validate_arguments()
+
+
+def test_paragraph_mode_off_disables_paragraph_config(tmp_path):
+    config = AppConfig(input_path=tmp_path / "input.m4a", paragraph_mode="off")
+
+    paragraph = config.paragraph_config()
+
+    assert paragraph.enabled is False
+
+
+def test_paragraph_validation_rejects_negative_gap(tmp_path):
+    config = AppConfig(input_path=tmp_path / "input.m4a", paragraph_gap=-1)
+
+    with pytest.raises(ConfigError, match="--paragraph-gap"):
+        config.validate_arguments()
+
+
+def test_paragraph_validation_rejects_non_positive_max_chars(tmp_path):
+    config = AppConfig(input_path=tmp_path / "input.m4a", paragraph_max_chars=0)
+
+    with pytest.raises(ConfigError, match="--paragraph-max-chars"):
+        config.validate_arguments()

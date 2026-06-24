@@ -62,3 +62,24 @@ def test_cli_parses_terms_options() -> None:
     assert args.asr_prompt == "技术会议"
     assert str(args.terms_file) == "terms.txt"
     assert args.no_term_correction is True
+
+
+def test_cli_parses_paragraph_options() -> None:
+    args = build_parser().parse_args([
+        "meeting.m4a",
+        "--paragraph-mode", "aggressive",
+        "--paragraph-gap", "2.5",
+        "--paragraph-max-duration", "180",
+        "--paragraph-max-chars", "1200",
+    ])
+
+    assert args.paragraph_mode == "aggressive"
+    assert args.paragraph_gap == 2.5
+    assert args.paragraph_max_duration == 180
+    assert args.paragraph_max_chars == 1200
+
+
+def test_cli_no_paragraph_merge_sets_mode_off() -> None:
+    args = build_parser().parse_args(["meeting.m4a", "--no-paragraph-merge"])
+
+    assert args.no_paragraph_merge is True
