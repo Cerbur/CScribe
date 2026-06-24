@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from mimo_transcriber.models import TranscriptionOutcome
+from mimo_transcriber.paragraphs import ParagraphConfig, build_transcript_blocks
 
 
 def format_timestamp(seconds: float) -> str:
@@ -37,17 +38,23 @@ def format_recording_time(value: datetime) -> str:
     return f"{local.year}年{local.month}月{local.day}日 {period} {hour}:{local.minute:02d}"
 
 
-def render_transcript(outcome: TranscriptionOutcome, recording_time: datetime) -> str:
+def render_transcript(
+    outcome: TranscriptionOutcome,
+    recording_time: datetime,
+    paragraph_config: ParagraphConfig | None = None,
+) -> str:
     first = (
         f"{format_recording_time(recording_time)}|"
         f"{format_duration(outcome.metadata.duration_seconds)}"
     )
+    config = paragraph_config or ParagraphConfig(enabled=False)
     ordered = sorted(outcome.segments, key=lambda s: s.sort_key())
-    blocks = [
-        f"{segment.display_speaker} {format_timestamp(segment.start)}\n{segment.text or ''}"
-        for segment in ordered
+    blocks = build_transcript_blocks(ordered, config)
+    rendered = [
+        f"{block.display_speaker} {format_timestamp(block.start)}\n{block.text}"
+        for block in blocks
     ]
-    transcript = "\n\n".join(blocks)
+    transcript = "\n\n".join(rendered)
     return (
         f"{first}\n\n关键词:\n{'、'.join(outcome.keywords)}\n\n"
         f"文字记录:\n{transcript}\n"
@@ -72,14 +79,16 @@ def write_outputs(
     recording_time: datetime,
     output_path: Path,
     debug_json: bool,
+    paragraph_config: ParagraphConfig | None = None,
 ) -> None:
-    _atomic_write(output_path, render_transcript(outcome, recording_time))
+    _atomic_write(output_path, render_transcript(outcome, recording_time, paragraph_config))
     if debug_json:
         payload = {
             "source": outcome.metadata.source_path.name,
             "duration_seconds": outcome.metadata.duration_seconds,
             "speakers": len({item.raw_speaker for item in outcome.segments}),
             "segments": [asdict(item) for item in outcome.segments],
+            "blocks": [asdict(item) for item in build_transcript_blocks(outcome.segments, paragraph_config or ParagraphConfig(enabled=False))],
         }
         json_path = output_path.with_suffix(".segments.json")
         _atomic_write(json_path, json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n")

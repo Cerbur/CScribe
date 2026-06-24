@@ -5,6 +5,7 @@ from mimo_transcriber.formatter import (
     format_duration,
     format_timestamp,
     render_transcript,
+    write_outputs,
 )
 from mimo_transcriber.models import (
     AudioMetadata,
@@ -12,6 +13,7 @@ from mimo_transcriber.models import (
     SpeakerSegment,
     TranscriptionOutcome,
 )
+from mimo_transcriber.paragraphs import ParagraphConfig
 
 
 def test_time_formats() -> None:
@@ -51,3 +53,50 @@ def test_render_transcript_uses_time_then_segment_id_order() -> None:
     )
     rendered = render_transcript(outcome, datetime(2026, 6, 15, 10, 0))
     assert rendered.index("先") < rendered.index("后")
+
+
+def outcome_with_segments(tmp_path: Path) -> TranscriptionOutcome:
+    return TranscriptionOutcome(
+        metadata=AudioMetadata(
+            source_path=tmp_path / "meeting.m4a",
+            duration_seconds=10,
+            codec="aac",
+            sample_rate=44100,
+            channels=1,
+            creation_time=None,
+        ),
+        segments=[
+            SpeakerSegment(0, 0, 3, "A", "说话人 1", "第一句。", SegmentStatus.SUCCESS, segment_id="s0000"),
+            SpeakerSegment(1, 3.5, 5, "A", "说话人 1", "然后第二句。", SegmentStatus.SUCCESS, segment_id="s0001"),
+        ],
+        keywords=[],
+    )
+
+
+def test_render_transcript_uses_paragraph_blocks(tmp_path: Path) -> None:
+    text = render_transcript(
+        outcome_with_segments(tmp_path),
+        datetime(2026, 6, 24, 10, 0),
+        ParagraphConfig(),
+    )
+
+    assert text.count("说话人 1 00:00") == 1
+    assert "第一句。然后第二句。" in text
+    assert "说话人 1 00:03" not in text
+
+
+def test_write_outputs_debug_json_includes_blocks(tmp_path: Path) -> None:
+    output = tmp_path / "out.txt"
+
+    write_outputs(
+        outcome_with_segments(tmp_path),
+        datetime(2026, 6, 24, 10, 0),
+        output,
+        debug_json=True,
+        paragraph_config=ParagraphConfig(),
+    )
+
+    debug = output.with_suffix(".segments.json").read_text(encoding="utf-8")
+    assert '"segments"' in debug
+    assert '"blocks"' in debug
+    assert '"source_segment_ids": [' in debug
