@@ -76,3 +76,18 @@ def test_task_hash_ignores_asr_runtime_controls(tmp_path: Path) -> None:
     )
 
     assert first.task_hash == second.task_hash
+
+
+def test_task_hash_changes_with_diarization_model(tmp_path: Path) -> None:
+    source = tmp_path / "input.m4a"
+    source.write_bytes(b"audio")
+    fingerprint = fingerprint_input(source)
+
+    first = TaskPaths.for_run(AppConfig(input_path=source), fingerprint, tmp_path)
+    second = TaskPaths.for_run(
+        AppConfig(input_path=source, diarization_model="local/other-model"),
+        fingerprint,
+        tmp_path,
+    )
+
+    assert first.task_hash != second.task_hash

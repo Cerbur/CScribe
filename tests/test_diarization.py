@@ -12,6 +12,7 @@ from mimo_transcriber.diarization import (
     log_device_decision,
     run_diarization,
     select_diarization_pipeline,
+    speaker_kwargs,
 )
 
 
@@ -366,3 +367,7 @@ def test_runtime_fallback_log_is_actionable_and_secret_free(
     assert "MPS 运行时可用: 否" in rendered
     assert "已回退 CPU" in rendered
     assert "检查 PyTorch、macOS 版本以及当前 Python 架构" in rendered
+
+
+def test_speaker_kwargs_prefers_resolved_num_speakers() -> None:
+    assert speaker_kwargs(2, 1, 6) == {"num_speakers": 2}

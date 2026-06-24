@@ -37,6 +37,7 @@ class AppConfig:
     device: Device = "auto"
     conversation_mode: ConversationMode = "auto"
     diarization_stabilizer: DiarizationStabilizer = "balanced"
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
     concurrency: int = 2
     requests_per_minute: int = 20
     max_retries: int = 3
@@ -80,6 +81,7 @@ class AppConfig:
             "num_speakers": self.resolved_num_speakers(),
             "min_speakers": self.min_speakers,
             "max_speakers": self.max_speakers,
+            "diarization_model": self.diarization_model,
             "language": self.language,
             "device": self.device,
             "keyword_count": self.keyword_count,

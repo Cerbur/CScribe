@@ -36,13 +36,22 @@ def speaker_kwargs(
     return {"min_speakers": min_speakers, "max_speakers": max_speakers}
 
 
-def create_pipeline(token: str, device: SelectedDevice) -> Any:
+def create_pipeline(token: str, device: SelectedDevice, model_id: str = MODEL_ID) -> Any:
     import torch
     from pyannote.audio import Pipeline
 
-    pipeline = Pipeline.from_pretrained(MODEL_ID, token=token)
+    pipeline = Pipeline.from_pretrained(model_id, token=token)
     pipeline.to(torch.device(device))
     return pipeline
+
+
+def _model_bound_factory(model_id: str) -> Callable[[str, SelectedDevice], Any]:
+    """Bind ``model_id`` into a 2-arg factory so callers stay signature-agnostic."""
+
+    def factory(token: str, device: SelectedDevice) -> Any:
+        return create_pipeline(token, device, model_id)
+
+    return factory
 
 
 def diarize_audio(
@@ -172,11 +181,14 @@ def select_diarization_pipeline(
     min_speakers: int,
     max_speakers: int,
     *,
+    model_id: str = MODEL_ID,
     capabilities: DeviceCapabilities | None = None,
-    pipeline_factory: Callable[[str, SelectedDevice], Any] = create_pipeline,
+    pipeline_factory: Callable[[str, SelectedDevice], Any] | None = None,
     cache_clearer: Callable[[], None] = clear_mps_cache,
     clock: Callable[[], float] = time.monotonic,
 ) -> PipelineSelection:
+    if pipeline_factory is None:
+        pipeline_factory = _model_bound_factory(model_id)
     facts = capabilities or collect_device_capabilities()
     if requested_device != "mps":
         selected = resolve_device(
@@ -264,11 +276,14 @@ def run_diarization(
     min_speakers: int,
     max_speakers: int,
     *,
+    model_id: str = MODEL_ID,
     capabilities: DeviceCapabilities | None = None,
-    pipeline_factory: Callable[[str, SelectedDevice], Any] = create_pipeline,
+    pipeline_factory: Callable[[str, SelectedDevice], Any] | None = None,
     cache_clearer: Callable[[], None] = clear_mps_cache,
     clock: Callable[[], float] = time.monotonic,
 ) -> DiarizationResult:
+    if pipeline_factory is None:
+        pipeline_factory = _model_bound_factory(model_id)
     selection = select_diarization_pipeline(
         preflight_path,
         token,
@@ -276,6 +291,7 @@ def run_diarization(
         num_speakers,
         min_speakers,
         max_speakers,
+        model_id=model_id,
         capabilities=capabilities,
         pipeline_factory=pipeline_factory,
         cache_clearer=cache_clearer,

@@ -209,9 +209,10 @@ async def run_pipeline(
                     preflight,
                     runtime.hf_token,
                     config.device,
-                    config.num_speakers,
+                    config.resolved_num_speakers(),
                     config.min_speakers,
                     config.max_speakers,
+                    model_id=config.diarization_model,
                 )
                 raw = diarization.segments
                 segments = process_segments(raw, metadata.duration_seconds)
