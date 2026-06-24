@@ -108,6 +108,7 @@ class AppConfig:
             "min_speakers": self.min_speakers,
             "max_speakers": self.max_speakers,
             "diarization_model": self.diarization_model,
+            "diarization_stabilizer": self.diarization_stabilizer,
             "language": self.language,
             "device": self.device,
             "keyword_count": self.keyword_count,
