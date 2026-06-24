@@ -124,3 +124,41 @@ def test_write_outputs_debug_json_includes_blocks(tmp_path: Path) -> None:
     assert '"segments"' in debug
     assert '"blocks"' in debug
     assert '"source_segment_ids": [' in debug
+
+
+def test_debug_json_contains_segments_blocks_and_speaker_stability(
+    tmp_path: Path,
+) -> None:
+    """Debug JSON must simultaneously expose the internal segments, the rendered
+    display blocks, and the speaker-stability diagnostics so each layer can be
+    inspected independently."""
+    import json
+
+    outcome = outcome_with_segments(tmp_path)
+    outcome.speaker_stability = SpeakerStabilityDiagnostics(
+        enabled=True,
+        mode="balanced",
+        dropped_overlaps=1,
+        relabeled_islands=0,
+    )
+    output = tmp_path / "out.txt"
+
+    write_outputs(
+        outcome,
+        datetime(2026, 6, 24, 10, 0),
+        output,
+        debug_json=True,
+        paragraph_config=ParagraphConfig(),
+    )
+
+    payload = json.loads(
+        output.with_suffix(".segments.json").read_text(encoding="utf-8")
+    )
+    # internal segments: two raw same-speaker fragments
+    assert len(payload["segments"]) == 2
+    # display blocks: merged into one paragraph block
+    assert len(payload["blocks"]) == 1
+    assert payload["blocks"][0]["source_segment_ids"] == ["s0000", "s0001"]
+    # speaker stability diagnostics
+    assert payload["speaker_stability"]["dropped_overlaps"] == 1
+    assert payload["speaker_stability"]["mode"] == "balanced"

@@ -789,3 +789,65 @@ async def test_pipeline_applies_speaker_stabilizer_before_slicing(tmp_path: Path
     )
 
     assert sliced == ["A", "A", "A"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_passes_resolved_speaker_count_to_diarization(
+    tmp_path: Path,
+) -> None:
+    """conversation-mode two-person without --num-speakers must reach diarization
+    as num_speakers=2; an explicit --num-speakers must override it to 3."""
+    diarize_calls: list[tuple] = []
+
+    def diarize(*args, **kwargs):
+        # Positional layout from run_pipeline:
+        # (normalized, preflight, hf_token, device, num_speakers, min, max)
+        diarize_calls.append(args)
+        return diarization_result([SpeakerSegment(-1, 0, 1, "A")])
+
+    async def transcribe(items, fail_fast):
+        segment = items[0][0]
+        segment.text = "ok"
+        segment.status = SegmentStatus.SUCCESS
+        return [segment]
+
+    def make_deps(input_meta: AudioMetadata) -> PipelineDependencies:
+        return PipelineDependencies(
+            probe=lambda path: input_meta,
+            normalize=lambda source, target: target.write_bytes(b"wav"),
+            create_preflight=lambda source, target: target.write_bytes(b"sample"),
+            diarize=diarize,
+            slice_audio=lambda source, segment, target: target.write_bytes(b"mp3"),
+            payload_fits=lambda path, segment: True,
+            transcribe=transcribe,
+        )
+
+    two_person = tmp_path / "two_person.m4a"
+    two_person.write_bytes(b"audio")
+    await run_pipeline(
+        AppConfig(
+            input_path=two_person,
+            output_path=tmp_path / "two_person.txt",
+            conversation_mode="two-person",
+        ),
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
+        make_deps(AudioMetadata(two_person, 1, "aac", 48000, 2, None)),
+        cache_root=tmp_path,
+    )
+
+    explicit_three = tmp_path / "three.m4a"
+    explicit_three.write_bytes(b"audio")
+    await run_pipeline(
+        AppConfig(
+            input_path=explicit_three,
+            output_path=tmp_path / "three.txt",
+            conversation_mode="two-person",
+            num_speakers=3,
+        ),
+        RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
+        make_deps(AudioMetadata(explicit_three, 1, "aac", 48000, 2, None)),
+        cache_root=tmp_path,
+    )
+
+    assert diarize_calls[0][4] == 2  # two-person resolved to 2
+    assert diarize_calls[1][4] == 3  # explicit --num-speakers wins
