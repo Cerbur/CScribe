@@ -14,8 +14,12 @@ else:
 
 from dotenv import load_dotenv
 
+from mimo_transcriber.speaker_stability import SpeakerStabilityConfig
+
 Device = Literal["auto", "cpu", "cuda", "mps"]
 Language = Literal["auto", "zh", "en"]
+ConversationMode = Literal["auto", "two-person", "multi"]
+DiarizationStabilizer = Literal["off", "conservative", "balanced", "aggressive"]
 
 
 class ConfigError(RuntimeError):
@@ -31,6 +35,8 @@ class AppConfig:
     max_speakers: int = 6
     language: Language = "auto"
     device: Device = "auto"
+    conversation_mode: ConversationMode = "auto"
+    diarization_stabilizer: DiarizationStabilizer = "balanced"
     concurrency: int = 2
     requests_per_minute: int = 20
     max_retries: int = 3
@@ -46,6 +52,20 @@ class AppConfig:
     def resolved_output_path(self) -> Path:
         return self.output_path or self.input_path.with_suffix(".txt")
 
+    def resolved_num_speakers(self) -> int | None:
+        if self.num_speakers is not None:
+            return self.num_speakers
+        if self.conversation_mode == "two-person":
+            return 2
+        return None
+
+    def speaker_stability_config(self) -> SpeakerStabilityConfig:
+        mode = "balanced" if self.diarization_stabilizer == "off" else self.diarization_stabilizer
+        return SpeakerStabilityConfig(
+            enabled=self.diarization_stabilizer != "off",
+            mode=mode,
+        )
+
     def asr_cache_identity(self) -> dict[str, object]:
         from mimo_transcriber.asr.base import AsrConfig
 
@@ -57,7 +77,7 @@ class AppConfig:
 
     def cache_parameters(self) -> dict[str, object]:
         return {
-            "num_speakers": self.num_speakers,
+            "num_speakers": self.resolved_num_speakers(),
             "min_speakers": self.min_speakers,
             "max_speakers": self.max_speakers,
             "language": self.language,

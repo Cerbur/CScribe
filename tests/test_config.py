@@ -66,3 +66,27 @@ def test_mimo_runtime_requires_mimo_key(
 
     with pytest.raises(ConfigError, match="缺少 MIMO_API_KEY"):
         validate_runtime(AppConfig(input_path=source, asr="mimo"))
+
+
+def test_two_person_mode_resolves_num_speakers(tmp_path: Path) -> None:
+    config = AppConfig(input_path=tmp_path / "in.m4a", conversation_mode="two-person")
+
+    assert config.resolved_num_speakers() == 2
+
+
+def test_explicit_num_speakers_overrides_two_person_mode(tmp_path: Path) -> None:
+    config = AppConfig(
+        input_path=tmp_path / "in.m4a",
+        conversation_mode="two-person",
+        num_speakers=3,
+    )
+
+    assert config.resolved_num_speakers() == 3
+
+
+def test_stabilizer_off_disables_config(tmp_path: Path) -> None:
+    config = AppConfig(input_path=tmp_path / "in.m4a", diarization_stabilizer="off")
+
+    stability = config.speaker_stability_config()
+
+    assert stability.enabled is False

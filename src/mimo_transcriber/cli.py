@@ -23,6 +23,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-speakers", type=int)
     parser.add_argument("--min-speakers", type=int, default=1)
     parser.add_argument("--max-speakers", type=int, default=6)
+    parser.add_argument(
+        "--conversation-mode",
+        choices=("auto", "two-person", "multi"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--diarization-stabilizer",
+        choices=("off", "conservative", "balanced", "aggressive"),
+        default="balanced",
+    )
     parser.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
     parser.add_argument(
         "--device",
@@ -102,6 +112,8 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         max_speakers=args.max_speakers,
         language=args.language,
         device=args.device,
+        conversation_mode=args.conversation_mode,
+        diarization_stabilizer=args.diarization_stabilizer,
         concurrency=args.concurrency,
         requests_per_minute=args.requests_per_minute,
         max_retries=args.max_retries,

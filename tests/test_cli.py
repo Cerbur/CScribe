@@ -49,3 +49,14 @@ def test_parser_accepts_mimo_asr_and_model() -> None:
 
     assert args.asr == "mimo"
     assert args.stt_model == "mimo-v2.5-asr"
+
+
+def test_cli_parses_diarization_stability_options() -> None:
+    args = build_parser().parse_args([
+        "meeting.m4a",
+        "--conversation-mode", "two-person",
+        "--diarization-stabilizer", "aggressive",
+    ])
+
+    assert args.conversation_mode == "two-person"
+    assert args.diarization_stabilizer == "aggressive"
