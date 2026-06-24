@@ -71,3 +71,11 @@ def test_off_mode_keeps_one_block_per_segment() -> None:
     ], ParagraphConfig(enabled=False, mode="balanced"))
 
     assert [block.source_segment_ids for block in blocks] == [["s0000"], ["s0001"]]
+
+
+def test_disabled_mode_preserves_raw_segment_text() -> None:
+    blocks = build_transcript_blocks(
+        [seg(0, 3, text="  hi  there  ", segment_id="s0000")],
+        ParagraphConfig(enabled=False),
+    )
+    assert blocks[0].text == "  hi  there  "

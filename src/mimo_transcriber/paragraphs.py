@@ -45,7 +45,8 @@ def build_transcript_blocks(
     ordered = sorted(segments, key=lambda item: item.sort_key())
     blocks: list[TranscriptBlock] = []
     for segment in ordered:
-        text = " ".join((segment.text or "").split())
+        raw = segment.text or ""
+        text = " ".join(raw.split()) if config.enabled else raw
         block = TranscriptBlock(
             index=-1,
             start=segment.start,
