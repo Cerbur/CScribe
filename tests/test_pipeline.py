@@ -60,6 +60,7 @@ async def test_partial_failure_writes_output_and_returns_two(tmp_path: Path) -> 
         AppConfig(input_path=source, output_path=output, num_speakers=2),
         RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         dependencies,
+        cache_root=tmp_path,
     )
     assert result.exit_code == 2
     assert output.exists()
@@ -125,6 +126,7 @@ async def test_fail_fast_does_not_write_formal_output(tmp_path: Path) -> None:
             ),
             RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
             dependencies,
+            cache_root=tmp_path,
         )
     assert output.exists() is False
 
@@ -176,6 +178,7 @@ async def test_pipeline_normalizes_and_creates_preflight_only_once(
         ),
         RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
         dependencies,
+        cache_root=tmp_path,
     )
 
     assert calls == ["normalize", "preflight", "diarize"]
@@ -206,6 +209,7 @@ async def test_fatal_cpu_fallback_failure_stops_before_slicing(
             AppConfig(input_path=source, device="mps"),
             RuntimeConfig(hf_token="hf", mimo_api_key="mimo"),
             dependencies,
+            cache_root=tmp_path,
         )
 
     assert sliced == []
